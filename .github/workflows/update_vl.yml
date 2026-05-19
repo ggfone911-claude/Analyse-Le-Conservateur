@@ -2,16 +2,15 @@ name: Mise à jour quotidienne des VL Boursorama
 
 on:
   schedule:
-    # Tous les jours à 8h00 heure de Paris (UTC+2 en été = 06:00 UTC)
-    - cron: '0 6 * * 1-5'   # Lundi–vendredi (marchés ouverts)
-    - cron: '0 7 * * 6'     # Samedi — mise à jour hebdo en bonus
-  workflow_dispatch:         # Déclenchement manuel possible depuis GitHub
+    - cron: '0 6 * * 1-5'
+    - cron: '0 7 * * 6'
+  workflow_dispatch:
 
 jobs:
   update-vl:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # Nécessaire pour git push
+      contents: write
 
     steps:
       - name: Checkout du repo
@@ -25,9 +24,7 @@ jobs:
           python-version: '3.11'
 
       - name: Scraping des VL sur Boursorama
-        run: |
-          python scraper.py
-        # Boursorama peut bloquer ponctuellement — on continue même si partiel
+        run: python scraper.py
         continue-on-error: true
 
       - name: Vérification du fichier généré
@@ -36,36 +33,27 @@ jobs:
             echo "✅ vl_overrides.json généré"
             python -c "import json; d=json.load(open('vl_overrides.json')); print(f'{len(d)} fonds scrapés')"
           else
-            echo "⚠️ vl_overrides.json absent — on utilise les données PDF"
+            echo "⚠️ vl_overrides.json absent"
           fi
 
       - name: Correction du chemin de sortie
         run: |
-          python3 -c "
-          import re
-          with open('gen_app_v2.py', 'r', encoding='utf-8') as f:
-              content = f.read()
-          content = re.sub(r\"out_path = '[^']*'\", \"out_path = 'index.html'\", content)
-          with open('gen_app_v2.py', 'w', encoding='utf-8') as f:
-              f.write(content)
-          print('✅ out_path corrigé → index.html')
-          "
+          sed -i "s|out_path = '[^']*'|out_path = 'index.html'|g" gen_app_v2.py
+          echo "✅ out_path corrigé"
 
       - name: Régénération de index.html
-        run: |
-          python gen_app_v2.py
+        run: python gen_app_v2.py
 
       - name: Commit et push si changements
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           git add index.html vl_overrides.json 2>/dev/null || true
           if git diff --staged --quiet; then
-            echo "Aucun changement détecté — pas de commit"
+            echo "Aucun changement détecté"
           else
             DATE=$(date '+%d/%m/%Y %H:%M')
             git commit -m "📈 Mise à jour VL Boursorama — ${DATE}"
-            git pull --rebase origin main
             git push
-            echo "✅ Déployé sur GitHub Pages"
           fi
