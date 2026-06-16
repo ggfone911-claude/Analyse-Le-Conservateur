@@ -393,7 +393,7 @@ worst = min((f for c in CATEGORIES for f in c["funds"] if f["ytd"] is not None),
 
 html_parts.append(f"""<header>
 <h1>📊 Le Conservateur — Analyse des Fonds</h1>
-<p>VL &amp; YTD : courscotations.conservateur.fr au 11 mai 2026 · Performances historiques : Boursorama (fin de mois 30/04/2026)</p>
+<p>VL &amp; YTD : courscotations.conservateur.fr au 12 juin 2026 · Performances historiques : Boursorama (fin de mois 30/04/2026)</p>
 </header>
 <div class="stats-bar">
   <div class="stat"><div class="val">{total}</div><div class="lbl">Fonds analysés</div></div>
