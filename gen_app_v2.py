@@ -21,7 +21,7 @@ if os.path.exists(_vl_path):
         print(f"⚠️  Impossible de lire vl_overrides.json : {_e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Boursorama performance data collected 12/05/2026 (calculs fin de mois 31/05/2026)
+# Boursorama performance data collected 12/05/2026 (calculs au 12/06/2026)
 # Format: { ISIN: { "bid": BoursoID, "ytd", "m1", "m6", "a1", "a3", "a5", "a10" } }
 # ─────────────────────────────────────────────────────────────────────────────
 def _p(s):
@@ -393,7 +393,7 @@ worst = min((f for c in CATEGORIES for f in c["funds"] if f["ytd"] is not None),
 
 html_parts.append(f"""<header>
 <h1>📊 Le Conservateur — Analyse des Fonds</h1>
-<p>VL &amp; YTD : courscotations.conservateur.fr au 12 juin 2026 · Performances historiques : Boursorama (fin de mois 31/05/2026)</p>
+<p>VL &amp; YTD : courscotations.conservateur.fr au 12 juin 2026 · Performances historiques : Boursorama (au 12/06/2026)</p>
 </header>
 <div class="stats-bar">
   <div class="stat"><div class="val">{total}</div><div class="lbl">Fonds analysés</div></div>
@@ -468,7 +468,7 @@ for i, cat in enumerate(CATEGORIES):
 
     html_parts.append(f'<div class="section {active}" id="sec_{cid}">\n')
     html_parts.append(f'<div class="cat-header"><h2>{cat["label"]}</h2><span class="badge">{len(cat["funds"])} fonds</span></div>\n')
-    html_parts.append('<div class="source-note">📅 Performances historiques issues de Boursorama — calcul fin de mois au 31/05/2026 · YTD (depuis le 1er janv.) issu de courscotations.conservateur.fr au 12/06/2026</div>\n')
+    html_parts.append('<div class="source-note">📅 Performances historiques issues de Boursorama — calcul au 12/06/2026 · YTD (depuis le 1er janv.) issu de courscotations.conservateur.fr au 12/06/2026</div>\n')
 
     # Top 5 cards
     html_parts.append('<div class="top5">\n')
@@ -492,7 +492,7 @@ for i, cat in enumerate(CATEGORIES):
     # Chart 1 : barres (période sélectionnable)
     html_parts.append(f'''<div class="chart-wrap">
 <h3 id="bartitle_{cid}">Performance YTD</h3>
-<div class="chart-sub">YTD au 12/06/2026 · Historique Boursorama fin de mois 31/05/2026</div>
+<div class="chart-sub">YTD au 12/06/2026 · Historique Boursorama au 12/06/2026</div>
 <div class="period-btns">
   <button class="period-btn active" data-cat="{cid}" data-bperiod="YTD" onclick="filterBarPeriod('{cid}','YTD')">YTD</button>
   <button class="period-btn" data-cat="{cid}" data-bperiod="1M" onclick="filterBarPeriod('{cid}','1M')">1 Mois</button>
@@ -508,7 +508,7 @@ for i, cat in enumerate(CATEGORIES):
     # Chart 2 : courbe multi-périodes (valeurs brutes %, pas de base 100)
     html_parts.append(f'''<div class="chart-wrap">
 <h3>Performances cumulées multi-horizons</h3>
-<div class="chart-sub">Données Boursorama fin de mois 31/05/2026 — axe Y : % cumulé réel</div>
+<div class="chart-sub">Données Boursorama au 12/06/2026 — axe Y : % cumulé réel</div>
 <div class="period-btns">
   <button class="period-btn active" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="3A" onclick="filterLinePeriod('{cid}','3A')">3 Ans</button>
@@ -587,11 +587,11 @@ for i, cat in enumerate(CATEGORIES):
   <th onclick="sortTable('tbl_{cid}',3)" style="text-align:center">SRRI</th>
   <th onclick="sortTable('tbl_{cid}',4)" style="text-align:right">VL</th>
   <th onclick="sortTable('tbl_{cid}',5)" style="text-align:right" title="YTD au 12/06/2026">YTD</th>
-  <th onclick="sortTable('tbl_{cid}',6)" style="text-align:right" title="1 mois — fin de mois 31/05/2026">1 Mois</th>
-  <th onclick="sortTable('tbl_{cid}',7)" style="text-align:right" title="6 mois — fin de mois 31/05/2026">6 Mois</th>
-  <th onclick="sortTable('tbl_{cid}',8)" style="text-align:right" title="1 an — fin de mois 31/05/2026">1 An</th>
-  <th onclick="sortTable('tbl_{cid}',9)" style="text-align:right" title="3 ans — fin de mois 31/05/2026">3 Ans</th>
-  <th onclick="sortTable('tbl_{cid}',10)" style="text-align:right" title="5 ans — fin de mois 31/05/2026">5 Ans</th>
+  <th onclick="sortTable('tbl_{cid}',6)" style="text-align:right" title="1 mois — au 12/06/2026">1 Mois</th>
+  <th onclick="sortTable('tbl_{cid}',7)" style="text-align:right" title="6 mois — au 12/06/2026">6 Mois</th>
+  <th onclick="sortTable('tbl_{cid}',8)" style="text-align:right" title="1 an — au 12/06/2026">1 An</th>
+  <th onclick="sortTable('tbl_{cid}',9)" style="text-align:right" title="3 ans — au 12/06/2026">3 Ans</th>
+  <th onclick="sortTable('tbl_{cid}',10)" style="text-align:right" title="5 ans — au 12/06/2026">5 Ans</th>
   <th style="text-align:center">Boursorama</th>
 </tr></thead>
 <tbody>
