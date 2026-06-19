@@ -223,12 +223,17 @@ def fetch_historical(isin: str, bid: str) -> list | None:
         return None
 
 
+_EPOCH = datetime.date(1970, 1, 1)
+
+
 def _parse_ticks(data) -> list | None:
     """
-    Convertit la réponse AmCharts de GetTicksEOD en liste mensuelle.
+    Convertit la réponse GetTicksEOD de Boursorama en liste mensuelle.
 
     Formats connus :
-      • {"d": [{"d":"2024-06-03","o":27.0,"h":27.1,"l":26.9,"c":27.05,"v":0}, ...]}
+      • {"d": {"QuoteTab": [{"d":20258,"o":630.633,"c":630.633,...}], ...}}
+        → format réel Boursorama (dates = jours depuis 1970-01-01)
+      • {"d": [{"d":"2024-06-03","o":27.0,"c":27.05,...}]}
       • [{"Date":"2024-06-03","Value":27.05}, ...]
       • {"DataSet": {"Series": [...]}}
     """
@@ -237,9 +242,14 @@ def _parse_ticks(data) -> list | None:
     if isinstance(data, list):
         series = data
     elif isinstance(data, dict):
-        if "d" in data and isinstance(data["d"], list):
-            series = data["d"]
-        elif "DataSet" in data:
+        if "d" in data:
+            d_val = data["d"]
+            if isinstance(d_val, list):
+                series = d_val
+            elif isinstance(d_val, dict) and "QuoteTab" in d_val:
+                # Format réel Boursorama : {"d": {"QuoteTab": [...], ...}}
+                series = d_val["QuoteTab"]
+        if series is None and "DataSet" in data:
             try:
                 series = data["DataSet"]["Series"][0]["Value"]
             except (KeyError, IndexError, TypeError):
@@ -257,10 +267,12 @@ def _parse_ticks(data) -> list | None:
 
         # Champ date
         raw_date = (
-            pt.get("d") or pt.get("Date") or pt.get("date")
-            or pt.get("t") or pt.get("T")
+            pt.get("d") if pt.get("d") is not None else None
         )
-        # Champ valeur (close, ou open si absent)
+        if raw_date is None:
+            raw_date = pt.get("Date") or pt.get("date") or pt.get("t") or pt.get("T")
+
+        # Champ valeur (close prioritaire, sinon open)
         raw_val = (
             pt.get("c") or pt.get("close")
             or pt.get("Value") or pt.get("value")
@@ -272,9 +284,13 @@ def _parse_ticks(data) -> list | None:
 
         # Normalise la date
         try:
-            date_str = str(raw_date).split("T")[0]
-            d = datetime.date.fromisoformat(date_str)
-        except ValueError:
+            if isinstance(raw_date, int):
+                # Boursorama : jours depuis 1970-01-01
+                d = _EPOCH + datetime.timedelta(days=raw_date)
+            else:
+                date_str = str(raw_date).split("T")[0]
+                d = datetime.date.fromisoformat(date_str)
+        except (ValueError, OverflowError):
             continue
 
         try:
