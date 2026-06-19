@@ -1,0 +1,53 @@
+name: Mise a jour mensuelle de l historique VL
+
+on:
+  schedule:
+    - cron: '0 7 1 * *'
+  workflow_dispatch:
+
+jobs:
+  update-historical:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout du repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Scraping historique mensuel Boursorama
+        run: python scraper_monthly.py
+        continue-on-error: true
+
+      - name: Verification du fichier genere
+        run: |
+          if [ -f historical_monthly.json ]; then
+            echo "OK historical_monthly.json present"
+            python -c "import json; d=json.load(open('historical_monthly.json')); fonds=d.get('data',{}); print(str(len(fonds))+' fonds, '+str(sum(len(v) for v in fonds.values()))+' points')"
+          else
+            echo "WARN historical_monthly.json absent"
+          fi
+
+      - name: Regeneration de index.html
+        run: python gen_app_v2.py
+
+      - name: Commit et push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "Aucun changement - pas de commit"
+          else
+            DATE=$(date '+%d/%m/%Y')
+            git commit -m "Historique mensuel VL - ${DATE}"
+            git push
+            echo "Deploye"
+          fi
