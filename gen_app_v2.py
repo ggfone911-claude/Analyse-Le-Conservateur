@@ -21,6 +21,22 @@ if os.path.exists(_vl_path):
         print(f"⚠️  Impossible de lire vl_overrides.json : {_e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Historical monthly VL — chargé depuis historical_monthly.json si disponible
+# Format : { ISIN: [{"date":"YYYY-MM","vl":float}, ...] }
+# ─────────────────────────────────────────────────────────────────────────────
+_HIST_DATA: dict = {}
+_hist_path = os.path.join(os.path.dirname(__file__), "historical_monthly.json")
+if os.path.exists(_hist_path):
+    try:
+        with open(_hist_path, encoding="utf-8") as _f:
+            _hraw = json.load(_f)
+        _HIST_DATA = _hraw.get("data", {})
+        _hist_pts = sum(len(v) for v in _HIST_DATA.values())
+        print(f"📊 historical_monthly.json chargé — {len(_HIST_DATA)} fonds, {_hist_pts} points")
+    except Exception as _e:
+        print(f"⚠️  Impossible de lire historical_monthly.json : {_e}")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Boursorama performance data collected 12/05/2026 (calculs au 12/06/2026)
 # Format: { ISIN: { "bid": BoursoID, "ytd", "m1", "m6", "a1", "a3", "a5", "a10" } }
 # ─────────────────────────────────────────────────────────────────────────────
@@ -466,6 +482,24 @@ for i, cat in enumerate(CATEGORIES):
     top5 = funds_sorted[:5]
     color = cat["color"]
 
+    # ── Données historiques mensuelles disponibles pour cette catégorie ? ──────
+    _HIST_MONTHS = ["","Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août","Sep","Oct","Nov","Déc"]
+    hist_in_cat = {
+        f["isin"]: _HIST_DATA[f["isin"]]
+        for f in funds_sorted
+        if f["isin"] in _HIST_DATA and len(_HIST_DATA[f["isin"]]) >= 3
+    }
+    use_hist = len(hist_in_cat) >= 2  # Minimum 2 fonds avec données historiques
+    if use_hist:
+        # Sélectionner les 12 derniers mois communs
+        all_hist_dates = sorted({
+            pt["date"]
+            for months in hist_in_cat.values()
+            for pt in months
+        })[-12:]
+    else:
+        all_hist_dates = []
+
     html_parts.append(f'<div class="section {active}" id="sec_{cid}">\n')
     html_parts.append(f'<div class="cat-header"><h2>{cat["label"]}</h2><span class="badge">{len(cat["funds"])} fonds</span></div>\n')
     html_parts.append('<div class="source-note">📅 Performances historiques issues de Boursorama — calcul au 12/06/2026 · YTD (depuis le 1er janv.) issu de courscotations.conservateur.fr au 12/06/2026</div>\n')
@@ -505,18 +539,31 @@ for i, cat in enumerate(CATEGORIES):
 </div>
 ''')
 
-    # Chart 2 : courbe multi-périodes (valeurs brutes %, pas de base 100)
-    html_parts.append(f'''<div class="chart-wrap">
-<h3>Performances cumulées multi-horizons</h3>
-<div class="chart-sub">Données Boursorama au 12/06/2026 — axe Y : % cumulé réel</div>
-<div class="period-btns">
-  <button class="period-btn active" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
+    # Chart 2 : courbe multi-périodes
+    if use_hist:
+        _line_subtitle = f"VL réelle Boursorama — {all_hist_dates[0] if all_hist_dates else '?'} → {all_hist_dates[-1] if all_hist_dates else '?'} · % de variation / 1er mois"
+        _line_buttons = f'''<div class="period-btns">
+  <button class="period-btn active" data-cat="{cid}" data-period="12M" onclick="filterLinePeriod('{cid}','12M')">12 Mois</button>
+  <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
+  <button class="period-btn" data-cat="{cid}" data-period="3M" onclick="filterLinePeriod('{cid}','3M')">3 Mois</button>
+</div>'''
+        _line_title = "Évolution VL — données réelles Boursorama"
+    else:
+        _line_subtitle = "Données Boursorama au 12/06/2026 — axe Y : % cumulé réel"
+        _line_buttons = f'''<div class="period-btns">
+  <button class="period-btn active" data-cat="{cid}" data-period="10A" onclick="filterLinePeriod('{cid}','10A')">10 Ans</button>
+  <button class="period-btn" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="3A" onclick="filterLinePeriod('{cid}','3A')">3 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="1A" onclick="filterLinePeriod('{cid}','1A')">1 An</button>
   <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
   <button class="period-btn" data-cat="{cid}" data-period="1M" onclick="filterLinePeriod('{cid}','1M')">1 Mois</button>
   <button class="period-btn" data-cat="{cid}" data-period="YTD" onclick="filterLinePeriod('{cid}','YTD')">YTD</button>
-</div>
+</div>'''
+        _line_title = "Performances cumulées multi-horizons"
+    html_parts.append(f'''<div class="chart-wrap">
+<h3>{_line_title}</h3>
+<div class="chart-sub">{_line_subtitle}</div>
+{_line_buttons}
 <canvas id="line_{cid}" height="{height_bar}"></canvas>
 </div>
 ''')
@@ -546,36 +593,78 @@ for i, cat in enumerate(CATEGORIES):
         }
     })
 
-    # Line chart — périodes de la plus ancienne à la plus récente
-    # X-axis: 5 Ans → 3 Ans → 1 An → 6 Mois → 1 Mois → YTD
-    line_datasets = []
-    for fi, f in enumerate(funds_sorted):
-        pts = [
-            f.get("a5"),   # 5 Ans
-            f.get("a3"),   # 3 Ans
-            f.get("a1"),   # 1 An
-            f.get("m6"),   # 6 Mois
-            f.get("m1"),   # 1 Mois
-            f.get("ytd"),  # YTD
+    # Line chart — historique mensuel si disponible, sinon performances cumulées
+    if use_hist and all_hist_dates:
+        # ── Mode historique : VL réelle normalisée en % de variation ────────
+        line_datasets = []
+        n_dates = len(all_hist_dates)
+        line_labels = [
+            f"{_HIST_MONTHS[int(d.split('-')[1])]} {d.split('-')[0][-2:]}"
+            for d in all_hist_dates
         ]
-        # Seulement si au moins 2 points non nuls
-        non_null = sum(1 for p in pts if p is not None)
-        if non_null < 2:
-            continue
-        lc = LINE_PALETTE[fi % len(LINE_PALETTE)]
-        line_datasets.append({
-            "label": f["name"][:35],
-            "data": pts,       # données affichées (modifiées lors du filtrage)
-            "fullData": pts,   # référence complète 6 points — ne jamais modifier
-            "borderColor": lc,
-            "backgroundColor": lc + "22",
-            "borderWidth": 2,
-            "pointRadius": 4,
-            "pointHoverRadius": 6,
-            "tension": 0.3,
-            "spanGaps": False,
+        line_weights = [i / (n_dates - 1) if n_dates > 1 else 0.0 for i in range(n_dates)]
+        for fi, f in enumerate(funds_sorted):
+            isin = f["isin"]
+            if isin not in hist_in_cat:
+                continue
+            monthly_dict = {pt["date"]: pt["vl"] for pt in hist_in_cat[isin]}
+            pts = [monthly_dict.get(d) for d in all_hist_dates]
+            non_null = [p for p in pts if p is not None]
+            if len(non_null) < 2:
+                continue
+            base = non_null[0]
+            if not base or base == 0:
+                continue
+            pts_pct = [round((p / base - 1) * 100, 3) if p is not None else None for p in pts]
+            lc = LINE_PALETTE[fi % len(LINE_PALETTE)]
+            line_datasets.append({
+                "label": f["name"][:35],
+                "data": pts_pct,
+                "fullData": pts_pct,
+                "borderColor": lc,
+                "borderWidth": 2,
+                "pointRadius": 3,
+            })
+        all_line_charts.append({
+            "id": f"line_{cid}",
+            "mode": "historical",
+            "labels": line_labels,
+            "weights": line_weights,
+            "datasets": line_datasets,
         })
-    all_line_charts.append({"id": f"line_{cid}", "datasets": line_datasets})
+    else:
+        # ── Mode performance : % cumulés bruts multi-horizons ────────────────
+        _PERF_LABELS  = ['10 Ans','5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD']
+        _PERF_WEIGHTS = [0.000, 0.500, 0.700, 0.900, 0.950, 0.992, 1.000]
+        line_datasets = []
+        for fi, f in enumerate(funds_sorted):
+            pts = [
+                f.get("a10"),  # 10 Ans
+                f.get("a5"),   # 5 Ans
+                f.get("a3"),   # 3 Ans
+                f.get("a1"),   # 1 An
+                f.get("m6"),   # 6 Mois
+                f.get("m1"),   # 1 Mois
+                f.get("ytd"),  # YTD
+            ]
+            if sum(1 for p in pts if p is not None) < 2:
+                continue
+            lc = LINE_PALETTE[fi % len(LINE_PALETTE)]
+            line_datasets.append({
+                "label": f["name"][:35],
+                "data": pts,
+                "fullData": pts,
+                "borderColor": lc,
+                "borderWidth": 2,
+                "pointRadius": 4,
+            })
+        all_line_charts.append({
+            "id": f"line_{cid}",
+            "mode": "performance",
+            "labels": _PERF_LABELS,
+            "weights": _PERF_WEIGHTS,
+            "datasets": line_datasets,
+        })
 
     # ── Table ──────────────────────────────────────────────────────────────────
     html_parts.append(f'''<div class="table-wrap">
@@ -674,8 +763,9 @@ class TinyChart {
     this.canvas  = canvas;
     this.ctx     = canvas.getContext('2d');
     this.type    = cfg.type;
-    this.labels  = cfg.labels  || [];
-    this.datasets= cfg.datasets|| [];
+    this.labels   = cfg.labels   || [];
+    this.datasets = cfg.datasets || [];
+    this.xWeights = cfg.xWeights || null;
     this._hov    = -1;
     this._hovX   = -1;
     canvas.addEventListener('mousemove', e=>this._onMove(e));
@@ -695,7 +785,7 @@ class TinyChart {
     this.W=W; this.H=H;
     this.render();
   }
-  setData(labels, datasets) { this.labels=labels; this.datasets=datasets; this._resize(); }
+  setData(labels, datasets, xWeights) { this.labels=labels; this.datasets=datasets; this.xWeights=xWeights||null; this._resize(); }
   render() { this.type==='hbar' ? this._drawHBar() : this._drawLine(); }
 
   /* ── Horizontal Bar ──────────────────────────────────────── */
@@ -768,7 +858,9 @@ class TinyChart {
     const dmin=Math.min(...allV), dmax=Math.max(...allV);
     const pad=(dmax-dmin||1)*0.08;
     const ymin=dmin-pad, ymax=dmax+pad, yr=ymax-ymin;
-    const xP=i=>PL+(n===1?cW/2:(i/(n-1))*cW);
+    // Axe X : positions proportionnelles au temps si xWeights disponible
+    const W0=this.xWeights;
+    const xP=i=>PL+(n===1?cW/2:(W0?W0[i]:i/(n-1))*cW);
     const yP=v=>PT+cH-((v-ymin)/yr)*cH;
     // y grid
     ctx.strokeStyle='#edf2f7'; ctx.lineWidth=1;
@@ -809,14 +901,45 @@ class TinyChart {
         ctx.setLineDash([]);
       }
     }
-    // lines
+    // ── Interpolation Catmull-Rom : calcule des valeurs intermédiaires ────────
+    // Génère STEPS points entre chaque paire de données connues consécutives,
+    // donnant une courbe continue et naturelle (pas juste des points reliés).
+    const SMOOTH_STEPS = 12;
+    function crVal(p0,p1,p2,p3,t) {
+      return 0.5*((2*p1)+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t*t+(-p0+3*p1-3*p2+p3)*t*t*t);
+    }
+    function buildInterpPts(rawData) {
+      // Collecter tous les points connus avec leur position x canvas
+      const kn=[];
+      rawData.forEach((v,i)=>{ if(v!=null&&!isNaN(v)) kn.push({x:xP(i),v}); });
+      if(kn.length<2) return kn.map(p=>({x:p.x,y:yP(p.v)}));
+      const out=[];
+      for(let i=0;i<kn.length-1;i++){
+        const p0=kn[Math.max(0,i-1)];
+        const p1=kn[i];
+        const p2=kn[i+1];
+        const p3=kn[Math.min(kn.length-1,i+2)];
+        for(let s=0;s<SMOOTH_STEPS;s++){
+          const t=s/SMOOTH_STEPS;
+          const x=p1.x+(p2.x-p1.x)*t;
+          const v=crVal(p0.v,p1.v,p2.v,p3.v,t);
+          out.push({x,y:yP(v)});
+        }
+      }
+      // Dernier point connu
+      const last=kn[kn.length-1];
+      out.push({x:last.x,y:yP(last.v)});
+      return out;
+    }
+    // Tracer les lignes interpolées
     ds.forEach(d=>{
       ctx.strokeStyle=d.borderColor||'#3266ad'; ctx.lineWidth=d.borderWidth||2;
-      ctx.lineJoin='round'; let st=false; ctx.beginPath();
-      (d.data||[]).forEach((v,i)=>{
-        if(v==null||isNaN(v)){st=false;return;}
-        if(!st){ctx.moveTo(xP(i),yP(v));st=true;}else ctx.lineTo(xP(i),yP(v));
-      });
+      ctx.lineJoin='round';
+      const pts=buildInterpPts(d.data||[]);
+      if(!pts.length) return;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x,pts[0].y);
+      for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k].x,pts[k].y);
       ctx.stroke();
     });
     // dots + valeurs sur chaque point
@@ -1057,30 +1180,38 @@ function filterBarPeriod(catId, period) {{
   if (el) el.textContent = 'Performance ' + BAR_PERIOD_TITLES[period];
 }}
 
-// ── Line charts (TinyChart) — % cumulés bruts, pas de base 100 ─────────────
-const LINE_ALL_LABELS = ['5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD'];
-const PERIOD_START = {{'5A':0,'3A':1,'1A':2,'6M':3,'1M':4,'YTD':5}};
+// ── Line charts (TinyChart) — historique mensuel ou performances cumulées ────
+// Chaque entrée de LINE_CHARTS contient ses propres labels, weights et mode.
 const LINE_CHARTS = {line_js};
 const lineInstances = {{}};
-const lineFullDs = {{}};   // catId → tableau complet des datasets (fullData intacts)
+const lineFullDs    = {{}};   // catId → datasets complets (fullData intacts)
+const lineMeta      = {{}};   // catId → {{mode, labels, weights}}
+
+// Indices de départ pour le mode "performance" (7 points)
+const PERF_START = {{'10A':0,'5A':1,'3A':2,'1A':3,'6M':4,'1M':5,'YTD':6}};
+// Nombre de mois à afficher pour le mode "historical"
+const HIST_COUNT = {{'12M':12,'6M':6,'3M':3,'1M':1}};
 
 LINE_CHARTS.forEach(c => {{
   const canvas = document.getElementById(c.id);
   if (!canvas || !c.datasets.length) return;
   const catId = c.id.replace('line_','');
-  // Construire les datasets avec fullData séparé
+  const allLabels  = c.labels  || [];
+  const allWeights = c.weights || null;   // null → espacement uniforme
   const builtDs = c.datasets.map(ds => ({{
-    label: ds.label,
-    data: (ds.fullData||ds.data).slice(),
-    fullData: (ds.fullData||ds.data).slice(),
+    label:       ds.label,
+    data:        (ds.fullData||ds.data).slice(),
+    fullData:    (ds.fullData||ds.data).slice(),
     borderColor: ds.borderColor,
     borderWidth: ds.borderWidth || 2,
     pointRadius: ds.pointRadius || 4
   }}));
   lineFullDs[catId] = builtDs;
+  lineMeta[catId]   = {{ mode: c.mode || 'performance', labels: allLabels, weights: allWeights }};
   lineInstances[catId] = new TinyChart(canvas, {{
-    type: 'line',
-    labels: LINE_ALL_LABELS.slice(),
+    type:     'line',
+    labels:   allLabels.slice(),
+    xWeights: allWeights ? allWeights.slice() : null,
     datasets: builtDs.map(ds => ({{ ...ds, data: ds.fullData.slice() }}))
   }});
 }});
@@ -1091,12 +1222,34 @@ function filterLinePeriod(catId, period) {{
   }});
   const chart = lineInstances[catId];
   if (!chart) return;
-  const start = PERIOD_START[period];
+  const meta       = lineMeta[catId] || {{}};
+  const allLabels  = meta.labels  || [];
+  const allWeights = meta.weights || null;
+  const mode       = meta.mode    || 'performance';
+
+  // Calculer l'indice de début selon le mode
+  let start = 0;
+  if (mode === 'historical') {{
+    const count = HIST_COUNT[period] || allLabels.length;
+    start = Math.max(0, allLabels.length - count);
+  }} else {{
+    start = PERF_START[period] || 0;
+  }}
+
+  const slicedLabels = allLabels.slice(start);
   const newDs = (lineFullDs[catId]||[]).map(ds => ({{
     ...ds,
     data: ds.fullData.slice(start)
   }}));
-  chart.setData(LINE_ALL_LABELS.slice(start), newDs);
+
+  // Re-normaliser les poids proportionnels pour la plage affichée
+  let normW = null;
+  if (allWeights) {{
+    const rawW = allWeights.slice(start);
+    const wMin = rawW[0], wMax = rawW[rawW.length-1], wRange = wMax - wMin || 1;
+    normW = rawW.map(w => (w - wMin) / wRange);
+  }}
+  chart.setData(slicedLabels, newDs, normW);
 }}
 
 // ── Resize fenêtre (debounce 120ms — sans boucle) ─────────────────────────
