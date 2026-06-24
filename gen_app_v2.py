@@ -867,6 +867,20 @@ _PORTFOLIOS_DATA = [
     },
 ]
 
+# ── Tri des fonds UC par performance 1 an décroissante ────────────────────
+def _a1_sort_key(fund_tuple):
+    s = fund_tuple[4]  # a1 string, e.g. "+2,06%" or "−4,94%"
+    if not s or s == "—":
+        return float('-inf')
+    try:
+        return float(s.replace("+","").replace("\u2212","-").replace("−","-").replace(",",".").replace("%",""))
+    except Exception:
+        return float('-inf')
+
+for _ptf in _PORTFOLIOS_DATA:
+    _sorted = sorted(_ptf["funds"], key=_a1_sort_key, reverse=True)
+    _ptf["funds"] = [(i+1,) + f[1:] for i, f in enumerate(_sorted)]
+
 def _ptf_perf(v):
     if v == "—":
         return '<span class="na">—</span>'
