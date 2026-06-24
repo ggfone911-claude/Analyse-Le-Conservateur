@@ -469,6 +469,9 @@ tr.top3 td:first-child{font-weight:700}
 .fe-range-hint{font-size:11px;color:#a0aec0}
 .fe-row>td{background:#fffdf0!important}
 .fe-row .fund-name{font-weight:600;color:#78350f}
+.chk-fund{width:15px;height:15px;cursor:pointer;accent-color:#4a90d9;flex-shrink:0}
+.uc-row.deselected>td{opacity:0.35}
+.uc-row.deselected .fund-name{text-decoration:line-through;color:#a0aec0}
 </style>
 </head>
 <body>
@@ -945,6 +948,7 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
 
     html_parts.append('<div class="table-wrap" style="border-radius:0 0 10px 10px;margin-top:0">\n')
     html_parts.append('<table>\n<thead><tr>\n')
+    html_parts.append('  <th style="width:24px"></th>\n')
     html_parts.append('  <th style="width:32px">#</th>\n  <th>Fonds</th>\n')
     html_parts.append('  <th style="text-align:center;width:48px">SRRI</th>\n')
     html_parts.append('  <th style="text-align:right;width:60px">YTD</th>\n')
@@ -956,6 +960,7 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
 
     # ── Fonds en Euros row (first, dynamic) ───────────────────────────────────
     html_parts.append(f'''<tr class="fe-row">
+  <td></td>
   <td style="font-size:13px;text-align:center">★</td>
   <td class="fund-name">🏦 Fonds en Euros</td>
   <td style="text-align:center"><span class="srri-badge" style="background:#22c55e">1</span></td>
@@ -973,6 +978,7 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
         _a3_f  = _parse_pct(a3);  _a5_f = _parse_pct(a5)
         def _dv(v): return str(v) if v is not None else "null"
         html_parts.append(f'''<tr class="uc-row" data-pct="{pct}" data-ytd="{_dv(_ytd_f)}" data-a1="{_dv(_a1_f)}" data-a3="{_dv(_a3_f)}" data-a5="{_dv(_a5_f)}">
+  <td style="text-align:center;padding:0 4px"><input type="checkbox" class="chk-fund" id="chk-{cc}-{rank}" checked onchange="updateFE()"></td>
   <td style="font-size:11px;color:#a0aec0">{rank}</td>
   <td class="fund-name">{name}</td>
   <td style="text-align:center"><span class="srri-badge" style="background:{sc}">{srri}</span></td>
@@ -1652,20 +1658,36 @@ function updateFE() {{
       '<div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-fe" style="width:' + feBarW + 'px"></div>'
       + '<span style="font-size:12px;font-weight:600;min-width:28px">' + feAlloc + '&nbsp;%</span></div>';
 
-    // UC fund allocation bars (repondérées à ucPct %)
+    // UC fund allocation bars — redistribution selon fonds cochés
+    const totalSelPct = pd.funds.reduce((s, f, i) => {{
+      const chk = document.getElementById('chk-' + pd.cc + '-' + (i + 1));
+      return s + ((chk && chk.checked) ? f.pct : 0);
+    }}, 0) || 100;
+
     pd.funds.forEach((f, i) => {{
-      const rank   = i + 1;
-      const newPct = Math.round(f.pct * ucScale * 10) / 10;
-      const barW   = Math.round(newPct * 3);
+      const rank    = i + 1;
+      const chk     = document.getElementById('chk-' + pd.cc + '-' + rank);
+      const sel     = chk ? chk.checked : true;
+      const row     = chk ? chk.closest('tr') : null;
+      if (row) row.classList.toggle('deselected', !sel);
       const allocEl = document.getElementById('alloc-' + pd.cc + '-' + rank);
-      if (allocEl) allocEl.innerHTML =
+      if (!allocEl) return;
+      if (!sel) {{
+        allocEl.innerHTML = '<span style="color:#cbd5e0;font-size:12px;padding-left:4px">—</span>';
+        return;
+      }}
+      const newPct = Math.round(f.pct / totalSelPct * ucPct * 10) / 10;
+      const barW   = Math.round(newPct * 3);
+      allocEl.innerHTML =
         '<div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-' + pd.cc + '" style="width:' + barW + 'px"></div>'
         + '<span style="font-size:12px;font-weight:600;min-width:28px">' + newPct.toFixed(1) + '&nbsp;%</span></div>';
     }});
 
-    // KPI blended : FE + UC pondérés
+    // KPI blended : FE + UC pondérés (fonds sélectionnés seulement)
     let sumW_a1 = 0, sumW_a3 = 0, totW = 0, totW3 = 0;
-    pd.funds.forEach(f => {{
+    pd.funds.forEach((f, i) => {{
+      const chk = document.getElementById('chk-' + pd.cc + '-' + (i + 1));
+      if (!chk || !chk.checked) return;
       if (f.a1 != null) {{ sumW_a1 += f.pct * f.a1; totW  += f.pct; }}
       if (f.a3 != null) {{ sumW_a3 += f.pct * f.a3; totW3 += f.pct; }}
     }});
