@@ -610,8 +610,7 @@ for i, cat in enumerate(CATEGORIES):
     else:
         _line_subtitle = f"Données Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)} — axe Y : % cumulé réel"
         _line_buttons = f'''<div class="period-btns">
-  <button class="period-btn active" data-cat="{cid}" data-period="10A" onclick="filterLinePeriod('{cid}','10A')">10 Ans</button>
-  <button class="period-btn" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
+  <button class="period-btn active" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="3A" onclick="filterLinePeriod('{cid}','3A')">3 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="1A" onclick="filterLinePeriod('{cid}','1A')">1 An</button>
   <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
@@ -693,12 +692,11 @@ for i, cat in enumerate(CATEGORIES):
         })
     else:
         # ── Mode performance : % cumulés bruts multi-horizons ────────────────
-        _PERF_LABELS  = ['10 Ans','5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD']
-        _PERF_WEIGHTS = [0.000, 0.500, 0.700, 0.900, 0.950, 0.992, 1.000]
+        _PERF_LABELS  = ['5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD']
+        _PERF_WEIGHTS = [0.000, 0.400, 0.750, 0.900, 0.967, 1.000]
         line_datasets = []
         for fi, f in enumerate(funds_sorted):
             pts = [
-                f.get("a10"),  # 10 Ans
                 f.get("a5"),   # 5 Ans
                 f.get("a3"),   # 3 Ans
                 f.get("a1"),   # 1 An
@@ -1387,7 +1385,7 @@ const lineFullDs    = {{}};   // catId → datasets complets (fullData intacts)
 const lineMeta      = {{}};   // catId → {{mode, labels, weights}}
 
 // Indices de départ pour le mode "performance" (7 points)
-const PERF_START = {{'10A':0,'5A':1,'3A':2,'1A':3,'6M':4,'1M':5,'YTD':6}};
+const PERF_START = {{'5A':0,'3A':1,'1A':2,'6M':3,'1M':4,'YTD':5}};
 // Nombre de mois à afficher pour le mode "historical"
 const HIST_COUNT = {{'12M':12,'6M':6,'3M':3,'1M':1}};
 
