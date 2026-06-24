@@ -25,16 +25,44 @@ if os.path.exists(_vl_path):
 # Format : { ISIN: [{"date":"YYYY-MM","vl":float}, ...] }
 # ─────────────────────────────────────────────────────────────────────────────
 _HIST_DATA: dict = {}
+_HIST_LAST_UPDATED: str | None = None
 _hist_path = os.path.join(os.path.dirname(__file__), "historical_monthly.json")
 if os.path.exists(_hist_path):
     try:
         with open(_hist_path, encoding="utf-8") as _f:
             _hraw = json.load(_f)
         _HIST_DATA = _hraw.get("data", {})
+        _HIST_LAST_UPDATED = _hraw.get("last_updated")
         _hist_pts = sum(len(v) for v in _HIST_DATA.values())
-        print(f"📊 historical_monthly.json chargé — {len(_HIST_DATA)} fonds, {_hist_pts} points")
+        print(f"📊 historical_monthly.json chargé — {len(_HIST_DATA)} fonds, {_hist_pts} points (màj: {_HIST_LAST_UPDATED})")
     except Exception as _e:
         print(f"⚠️  Impossible de lire historical_monthly.json : {_e}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers de formatage de date
+# ─────────────────────────────────────────────────────────────────────────────
+_MOIS_FR = ["janvier","février","mars","avril","mai","juin",
+            "juillet","août","septembre","octobre","novembre","décembre"]
+
+def _fmt_date_fr(iso: str | None) -> str:
+    """'2026-06-24' → '24 juin 2026'  |  None → aujourd'hui"""
+    if not iso:
+        iso = datetime.date.today().isoformat()
+    try:
+        d = datetime.date.fromisoformat(iso)
+        return f"{d.day} {_MOIS_FR[d.month - 1]} {d.year}"
+    except ValueError:
+        return iso
+
+def _fmt_date_short(iso: str | None) -> str:
+    """'2026-06-24' → '24/06/2026'  |  None → aujourd'hui"""
+    if not iso:
+        iso = datetime.date.today().isoformat()
+    try:
+        d = datetime.date.fromisoformat(iso)
+        return f"{d.day:02d}/{d.month:02d}/{d.year}"
+    except ValueError:
+        return iso
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Boursorama performance data collected 12/05/2026 (calculs au 12/06/2026)
@@ -323,7 +351,7 @@ html_parts.append("""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Le Conservateur – Analyse des Fonds 12/05/2026</title>
+<title>Le Conservateur – Analyse des Fonds {_fmt_date_short(datetime.date.today().isoformat())}</title>
 <!-- Chart.js embarqué — fichier autonome, pas de CDN -->
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -409,7 +437,7 @@ worst = min((f for c in CATEGORIES for f in c["funds"] if f["ytd"] is not None),
 
 html_parts.append(f"""<header>
 <h1>📊 Le Conservateur — Analyse des Fonds</h1>
-<p>VL &amp; YTD : courscotations.conservateur.fr au 12 juin 2026 · Performances historiques : Boursorama (au 12/06/2026)</p>
+<p>VL &amp; YTD : {_fmt_date_fr(_VL_OVERRIDE_DATE)} · Performances historiques : Boursorama (au {_fmt_date_short(_HIST_LAST_UPDATED)})</p>
 </header>
 <div class="stats-bar">
   <div class="stat"><div class="val">{total}</div><div class="lbl">Fonds analysés</div></div>
@@ -502,7 +530,7 @@ for i, cat in enumerate(CATEGORIES):
 
     html_parts.append(f'<div class="section {active}" id="sec_{cid}">\n')
     html_parts.append(f'<div class="cat-header"><h2>{cat["label"]}</h2><span class="badge">{len(cat["funds"])} fonds</span></div>\n')
-    html_parts.append('<div class="source-note">📅 Performances historiques issues de Boursorama — calcul au 12/06/2026 · YTD (depuis le 1er janv.) issu de courscotations.conservateur.fr au 12/06/2026</div>\n')
+    html_parts.append('<div class="source-note">📅 Performances historiques issues de Boursorama — calcul au {_fmt_date_short(_HIST_LAST_UPDATED)} · YTD (depuis le 1er janv.) issu de Boursorama au {_fmt_date_short(_VL_OVERRIDE_DATE)}</div>\n')
 
     # Top 5 cards
     html_parts.append('<div class="top5">\n')
@@ -526,7 +554,7 @@ for i, cat in enumerate(CATEGORIES):
     # Chart 1 : barres (période sélectionnable)
     html_parts.append(f'''<div class="chart-wrap">
 <h3 id="bartitle_{cid}">Performance YTD</h3>
-<div class="chart-sub">YTD au 12/06/2026 · Historique Boursorama au 12/06/2026</div>
+<div class="chart-sub">YTD au {_fmt_date_short(_VL_OVERRIDE_DATE)} · Historique Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)}</div>
 <div class="period-btns">
   <button class="period-btn active" data-cat="{cid}" data-bperiod="YTD" onclick="filterBarPeriod('{cid}','YTD')">YTD</button>
   <button class="period-btn" data-cat="{cid}" data-bperiod="1M" onclick="filterBarPeriod('{cid}','1M')">1 Mois</button>
@@ -549,7 +577,7 @@ for i, cat in enumerate(CATEGORIES):
 </div>'''
         _line_title = "Évolution VL — données réelles Boursorama"
     else:
-        _line_subtitle = "Données Boursorama au 12/06/2026 — axe Y : % cumulé réel"
+        _line_subtitle = "Données Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)} — axe Y : % cumulé réel"
         _line_buttons = f'''<div class="period-btns">
   <button class="period-btn active" data-cat="{cid}" data-period="10A" onclick="filterLinePeriod('{cid}','10A')">10 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
@@ -675,12 +703,12 @@ for i, cat in enumerate(CATEGORIES):
   <th onclick="sortTable('tbl_{cid}',2)">Gérant</th>
   <th onclick="sortTable('tbl_{cid}',3)" style="text-align:center">SRRI</th>
   <th onclick="sortTable('tbl_{cid}',4)" style="text-align:right">VL</th>
-  <th onclick="sortTable('tbl_{cid}',5)" style="text-align:right" title="YTD au 12/06/2026">YTD</th>
-  <th onclick="sortTable('tbl_{cid}',6)" style="text-align:right" title="1 mois — au 12/06/2026">1 Mois</th>
-  <th onclick="sortTable('tbl_{cid}',7)" style="text-align:right" title="6 mois — au 12/06/2026">6 Mois</th>
-  <th onclick="sortTable('tbl_{cid}',8)" style="text-align:right" title="1 an — au 12/06/2026">1 An</th>
-  <th onclick="sortTable('tbl_{cid}',9)" style="text-align:right" title="3 ans — au 12/06/2026">3 Ans</th>
-  <th onclick="sortTable('tbl_{cid}',10)" style="text-align:right" title="5 ans — au 12/06/2026">5 Ans</th>
+  <th onclick="sortTable('tbl_{cid}',5)" style="text-align:right" title="YTD au {_fmt_date_short(_VL_OVERRIDE_DATE)}">YTD</th>
+  <th onclick="sortTable('tbl_{cid}',6)" style="text-align:right" title="1 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 Mois</th>
+  <th onclick="sortTable('tbl_{cid}',7)" style="text-align:right" title="6 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">6 Mois</th>
+  <th onclick="sortTable('tbl_{cid}',8)" style="text-align:right" title="1 an — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 An</th>
+  <th onclick="sortTable('tbl_{cid}',9)" style="text-align:right" title="3 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">3 Ans</th>
+  <th onclick="sortTable('tbl_{cid}',10)" style="text-align:right" title="5 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">5 Ans</th>
   <th style="text-align:center">Boursorama</th>
 </tr></thead>
 <tbody>
@@ -1164,7 +1192,7 @@ BAR_CHARTS.forEach(c => {{
   }});
 }});
 
-const BAR_PERIOD_TITLES = {{'YTD':'YTD (au 12/06/2026)','1M':'1 Mois','6M':'6 Mois','1A':'1 An','3A':'3 Ans','5A':'5 Ans'}};
+const BAR_PERIOD_TITLES = {{'YTD':'YTD (au {_fmt_date_short(_VL_OVERRIDE_DATE)})','1M':'1 Mois','6M':'6 Mois','1A':'1 An','3A':'3 Ans','5A':'5 Ans'}};
 
 function filterBarPeriod(catId, period) {{
   document.querySelectorAll('.period-btn[data-cat="'+catId+'"][data-bperiod]').forEach(b => {{
