@@ -469,6 +469,12 @@ tr.top3 td:first-child{font-weight:700}
 .fe-range-hint{font-size:11px;color:#a0aec0}
 .fe-row>td{background:#fffdf0!important}
 .fe-row .fund-name{font-weight:600;color:#78350f}
+.ptf-bar-dop{background:#7c3aed}
+.dop-row>td{background:#f5f3ff!important}
+.dop-row .fund-name{font-weight:600;color:#5b21b6}
+.dop-slider{-webkit-appearance:none;appearance:none;width:150px;height:4px;border-radius:2px;outline:none;cursor:pointer;background:#ddd6fe}
+.dop-slider::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#7c3aed;cursor:pointer;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.dop-lbl{font-size:13px;font-weight:500;color:#5b21b6;white-space:nowrap}
 .chk-fund{width:15px;height:15px;cursor:pointer;accent-color:#4a90d9;flex-shrink:0}
 .uc-row.deselected>td{opacity:0.35}
 .uc-row.deselected .fund-name{text-decoration:line-through;color:#a0aec0}
@@ -923,6 +929,21 @@ html_parts.append('''<div class="fe-controls">
       <span class="fe-tranche-hint" id="feTranche">UC ≥ 70 %</span>
     </div>
   </div>
+  <div class="fe-ctrl-row" style="margin-top:10px;padding-top:10px;border-top:1px solid #e9d5ff">
+    <span style="font-size:20px">💎</span>
+    <span class="dop-lbl" style="font-size:14px;font-weight:700">DOP</span>
+    <div class="fe-ctrl-group">
+      <span class="dop-lbl">Allocation DOP&nbsp;:</span>
+      <input class="dop-slider" id="dopSlider" type="range" min="0" max="30" value="0" oninput="updateFE()">
+      <span class="dop-lbl"><span id="dopAllocVal">0</span>&nbsp;%</span>
+      <span class="fe-range-hint">(0–30 %)</span>
+    </div>
+    <div class="fe-ctrl-group">
+      <span class="dop-lbl">Taux fixe&nbsp;:</span>
+      <span style="font-size:18px;font-weight:700;color:#5b21b6">5,00&nbsp;%</span>
+      <span class="fe-range-hint">/ an</span>
+    </div>
+  </div>
 </div>\n''')
 
 # Inner portfolio tabs
@@ -969,6 +990,18 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
   <td style="text-align:right" id="fe-a3-{ptf["id"]}">—</td>
   <td style="text-align:right" id="fe-a5-{ptf["id"]}">—</td>
   <td id="fe-alloc-{ptf["id"]}"><div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-fe" style="width:84px"></div><span style="font-size:12px;font-weight:600;min-width:28px">30 %</span></div></td>
+</tr>\n''')
+
+    html_parts.append(f'''<tr class="dop-row">
+  <td></td>
+  <td style="font-size:13px;text-align:center">★</td>
+  <td class="fund-name">💎 DOP</td>
+  <td style="text-align:center"><span class="srri-badge" style="background:#7c3aed">2</span></td>
+  <td style="text-align:right" id="dop-ytd-{ptf["id"]}">—</td>
+  <td style="text-align:right" id="dop-a1-{ptf["id"]}">—</td>
+  <td style="text-align:right" id="dop-a3-{ptf["id"]}">—</td>
+  <td style="text-align:right" id="dop-a5-{ptf["id"]}">—</td>
+  <td id="dop-alloc-{ptf["id"]}"><span style="color:#cbd5e0;font-size:12px;padding-left:4px">—</span></td>
 </tr>\n''')
 
     for rank, name, srri, ytd, a1, a3, a5, pct in ptf["funds"]:
@@ -1608,22 +1641,27 @@ function _getFETranche(ucPct) {{
 }}
 
 function updateFE() {{
-  const feAlloc = parseInt(document.getElementById('feSlider')?.value) || 30;
-  const ucPct   = 100 - feAlloc;
-  const taux    = _getFERate(ucPct);
+  const feAlloc  = parseInt(document.getElementById('feSlider')?.value)  || 30;
+  const dopAlloc = parseInt(document.getElementById('dopSlider')?.value) || 0;
+  const ucPct    = 100 - feAlloc - dopAlloc;
+  const taux     = _getFERate(ucPct);
 
-  // Mettre à jour l'affichage des contrôles
+  // Contrôles
   const dispEl = document.getElementById('feAllocVal');
   if (dispEl) dispEl.textContent = feAlloc;
+  const dopDispEl = document.getElementById('dopAllocVal');
+  if (dopDispEl) dopDispEl.textContent = dopAlloc;
   const tauxEl = document.getElementById('feTauxDisplay');
   if (tauxEl) tauxEl.textContent = taux.toFixed(2).replace('.', ',') + ' %';
   const trancheEl = document.getElementById('feTranche');
   if (trancheEl) trancheEl.textContent = _getFETranche(ucPct);
 
-  const ucScale = ucPct / 100;
-  const t       = taux / 100;
+  const ucScale  = ucPct / 100;
+  const t        = taux / 100;
+  const DOP_RATE = 5.0;
+  const dopT     = DOP_RATE / 100;
 
-  // YTD fraction (jours depuis 1er jan / 365)
+  // YTD fraction
   const now   = new Date();
   const jan1  = new Date(now.getFullYear(), 0, 1);
   const ytdFr = (now - jan1) / (1000 * 60 * 60 * 24 * 365);
@@ -1631,8 +1669,14 @@ function updateFE() {{
   const fePerfs = {{
     ytd: taux * ytdFr,
     a1:  taux,
-    a3:  (Math.pow(1 + t, 3) - 1) * 100,
-    a5:  (Math.pow(1 + t, 5) - 1) * 100
+    a3:  (Math.pow(1 + t,    3) - 1) * 100,
+    a5:  (Math.pow(1 + t,    5) - 1) * 100
+  }};
+  const dopPerfs = {{
+    ytd: DOP_RATE * ytdFr,
+    a1:  DOP_RATE,
+    a3:  (Math.pow(1 + dopT, 3) - 1) * 100,
+    a5:  (Math.pow(1 + dopT, 5) - 1) * 100
   }};
 
   const fmtFE = v =>
@@ -1644,21 +1688,31 @@ function updateFE() {{
     '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">'
       + (v >= 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + '&nbsp;%</span>';
 
+  const mkBar = (pct, cls) =>
+    '<div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-' + cls + '" style="width:' + Math.round(pct * 2.04) + 'px"></div>'
+    + '<span style="font-size:12px;font-weight:600;min-width:28px">' + pct + '&nbsp;%</span></div>';
+
+  const emptyBar = '<span style="color:#cbd5e0;font-size:12px;padding-left:4px">—</span>';
+
   Object.entries(_PTF_DATA).forEach(([pid, pd]) => {{
-    // FE row — cellules perf
+
+    // ── FE row
     ['ytd', 'a1', 'a3', 'a5'].forEach(k => {{
       const el = document.getElementById('fe-' + k + '-' + pid);
       if (el) el.innerHTML = fmtFE(fePerfs[k]);
     }});
-
-    // FE allocation bar
-    const feBarW = Math.round(feAlloc * 2.04);
     const feAllocEl = document.getElementById('fe-alloc-' + pid);
-    if (feAllocEl) feAllocEl.innerHTML =
-      '<div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-fe" style="width:' + feBarW + 'px"></div>'
-      + '<span style="font-size:12px;font-weight:600;min-width:28px">' + feAlloc + '&nbsp;%</span></div>';
+    if (feAllocEl) feAllocEl.innerHTML = mkBar(feAlloc, 'fe');
 
-    // UC fund allocation bars — redistribution selon fonds cochés
+    // ── DOP row
+    ['ytd', 'a1', 'a3', 'a5'].forEach(k => {{
+      const el = document.getElementById('dop-' + k + '-' + pid);
+      if (el) el.innerHTML = dopAlloc > 0 ? fmtFE(dopPerfs[k]) : '<span class="na">—</span>';
+    }});
+    const dopAllocEl = document.getElementById('dop-alloc-' + pid);
+    if (dopAllocEl) dopAllocEl.innerHTML = dopAlloc > 0 ? mkBar(dopAlloc, 'dop') : emptyBar;
+
+    // ── UC fund allocation bars — redistribution sur fonds cochés
     const totalSelPct = pd.funds.reduce((s, f, i) => {{
       const chk = document.getElementById('chk-' + pd.cc + '-' + (i + 1));
       return s + ((chk && chk.checked) ? f.pct : 0);
@@ -1668,14 +1722,11 @@ function updateFE() {{
       const rank    = i + 1;
       const chk     = document.getElementById('chk-' + pd.cc + '-' + rank);
       const sel     = chk ? chk.checked : true;
-      const row     = chk ? chk.closest('tr') : null;
-      if (row) row.classList.toggle('deselected', !sel);
+      const rowEl   = chk ? chk.closest('tr') : null;
+      if (rowEl) rowEl.classList.toggle('deselected', !sel);
       const allocEl = document.getElementById('alloc-' + pd.cc + '-' + rank);
       if (!allocEl) return;
-      if (!sel) {{
-        allocEl.innerHTML = '<span style="color:#cbd5e0;font-size:12px;padding-left:4px">—</span>';
-        return;
-      }}
+      if (!sel) {{ allocEl.innerHTML = emptyBar; return; }}
       const newPct = Math.round(f.pct / totalSelPct * ucPct * 10) / 10;
       const barW   = Math.round(newPct * 3);
       allocEl.innerHTML =
@@ -1683,7 +1734,7 @@ function updateFE() {{
         + '<span style="font-size:12px;font-weight:600;min-width:28px">' + newPct.toFixed(1) + '&nbsp;%</span></div>';
     }});
 
-    // KPI blended : FE + UC pondérés (fonds sélectionnés seulement)
+    // ── KPI blended : FE + DOP + UC (fonds sélectionnés)
     let sumW_a1 = 0, sumW_a3 = 0, totW = 0, totW3 = 0;
     pd.funds.forEach((f, i) => {{
       const chk = document.getElementById('chk-' + pd.cc + '-' + (i + 1));
@@ -1693,8 +1744,8 @@ function updateFE() {{
     }});
     if (totW  === 0) totW  = 100;
     if (totW3 === 0) totW3 = 100;
-    const blend_a1 = feAlloc / 100 * fePerfs.a1 + ucScale * (sumW_a1 / totW);
-    const blend_a3 = feAlloc / 100 * fePerfs.a3 + ucScale * (sumW_a3 / totW3);
+    const blend_a1 = feAlloc / 100 * fePerfs.a1 + dopAlloc / 100 * dopPerfs.a1 + ucScale * (sumW_a1 / totW);
+    const blend_a3 = feAlloc / 100 * fePerfs.a3 + dopAlloc / 100 * dopPerfs.a3 + ucScale * (sumW_a3 / totW3);
 
     const k1 = document.getElementById('kpi-a1-' + pid);
     const k3 = document.getElementById('kpi-a3-' + pid);
