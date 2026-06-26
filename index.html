@@ -3347,10 +3347,9 @@ const PersoMgr = (function() {
   function render() { renderTabBar(); renderPanels(); switchTo(active); }
 
   function renderTabBar() {
-    const bar = document.getElementById('perso-tab-bar'); if (!bar) return;
-    bar.innerHTML = state.portfolios.map(p =>
-      `<button class="perso-tab-btn" data-id="${p.id}" onclick="PersoMgr.switchTo('${p.id}')">${escH(p.label)}</button>`
-    ).join('') + '<button class="perso-tab-new" onclick="PersoMgr.createNew()">＋ Nouveau</button>';
+    // Les onglets sont maintenant intégrés dans l'en-tête du tableau de chaque panel
+    const bar = document.getElementById('perso-tab-bar');
+    if (bar) bar.innerHTML = '';
   }
 
   function renderPanels() {
@@ -3429,21 +3428,43 @@ const PersoMgr = (function() {
       });
     }
 
+    // Onglets de portefeuille (tous les portefeuilles, celui-ci actif)
+    const tabBtns = state.portfolios.map(px =>
+      `<button class="perso-tab-btn${px.id===id?' active':''}" data-id="${px.id}" onclick="PersoMgr.switchTo('${px.id}')">${escH(px.label)}</button>`
+    ).join('') + `<button class="perso-tab-new" onclick="PersoMgr.createNew()">＋</button>`;
+
     return `<div class="perso-panel" data-id="${id}">
       ${feCtrl}
       <div style="overflow-x:auto;margin-top:10px">
         <table class="fund-table" style="width:100%">
-          <thead><tr>
-            <th style="width:24px"></th><th>#</th><th>Fonds</th><th>SRRI</th>
-            <th colspan="5" style="text-align:right;padding-right:6px">
-              <span style="display:inline-flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-                <button class="perso-action-btn" onclick="PersoMgr.rename('${id}')">✏️ Renommer</button>
-                <button class="perso-action-btn primary" onclick="PersoMgr.openSelector('${id}')">🔍 Modifier les fonds</button>
-                <button class="perso-action-btn" onclick="PersoMgr.duplicate('${id}')">📋 Dupliquer</button>
-                <button class="perso-action-btn danger" onclick="PersoMgr.deletePortfolio('${id}')">🗑️ Supprimer</button>
-              </span>
-            </th>
-          </tr></thead>
+          <thead>
+            <tr>
+              <th rowspan="2" style="width:24px"></th>
+              <th rowspan="2" style="font-size:11px">#</th>
+              <th rowspan="2">Fonds</th>
+              <th rowspan="2" style="text-align:center">SRRI</th>
+              <th colspan="5" style="padding:4px 6px 4px 6px;border-bottom:1px solid #e2e8f0">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
+                  <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+                    ${tabBtns}
+                  </div>
+                  <div style="display:flex;gap:4px;align-items:center">
+                    <button class="perso-action-btn" onclick="PersoMgr.rename('${id}')">✏️ Renommer</button>
+                    <button class="perso-action-btn primary" onclick="PersoMgr.openSelector('${id}')">🔍 Modifier</button>
+                    <button class="perso-action-btn" onclick="PersoMgr.duplicate('${id}')">📋</button>
+                    <button class="perso-action-btn danger" onclick="PersoMgr.deletePortfolio('${id}')">🗑️</button>
+                  </div>
+                </div>
+              </th>
+            </tr>
+            <tr>
+              <th style="text-align:right;font-size:11px">YTD</th>
+              <th style="text-align:right;font-size:11px">1 An</th>
+              <th style="text-align:right;font-size:11px">3 Ans</th>
+              <th style="text-align:right;font-size:11px">5 Ans</th>
+              <th style="font-size:11px">Allocation</th>
+            </tr>
+          </thead>
           <tbody>${tbody}</tbody>
         </table>
       </div>
