@@ -405,6 +405,10 @@ tr.top3 td:first-child{font-weight:700}
 .bourso-link:hover{text-decoration:underline}
 .source-note{font-size:11px;color:#a0aec0;margin-bottom:8px}
 .filter-bar{display:flex;gap:10px;padding:12px 32px;background:#fff;border-bottom:2px solid #e2e8f0;align-items:center;flex-wrap:wrap}
+.view-tabs{display:flex;gap:6px;align-items:center;margin-left:auto}
+.view-tab{padding:5px 14px;border:1.5px solid #e2e8f0;border-radius:20px;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#4a5568;transition:all .15s;white-space:nowrap}
+.view-tab:hover:not(.active){border-color:#3266ad;color:#3266ad}
+.view-tab.active{background:#3266ad;color:#fff;border-color:#3266ad}
 .filter-bar label{font-size:12px;font-weight:600;color:#4a5568;white-space:nowrap}
 .search-input{border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;font-size:13px;width:220px;outline:none;color:#1a202c}
 .search-input:focus{border-color:#3266ad;box-shadow:0 0 0 3px rgba(50,102,173,.12)}
@@ -548,7 +552,7 @@ html_parts.append(f"""<header>
 """)
 
 # ── Barre de filtres (recherche + SRRI) ──────────────────────────────────────
-html_parts.append("""<div class="filter-bar">
+html_parts.append(f"""<div class="filter-bar">
   <label>🔍</label>
   <input class="search-input" id="searchInput" type="text" placeholder="Rechercher un fonds..." oninput="applyFilters()">
   <label style="margin-left:8px;font-size:12px;font-weight:600;color:#4a5568">Risque SRRI :</label>
@@ -562,6 +566,10 @@ html_parts.append("""<div class="filter-bar">
     <button class="srri-btn srri-7" data-srri="7" onclick="toggleSRRI(7)" title="SRRI 7 — Très élevé">7</button>
   </div>
   <button class="clear-btn" onclick="clearFilters()">✕ Effacer</button>
+  <div class="view-tabs">
+    <button class="view-tab" id="tab_portefeuilles" onclick="showTab('portefeuilles')">💼 Portefeuilles</button>
+    <button class="view-tab" id="tab_perso" onclick="showTab('perso')">👤 Perso</button>
+  </div>
 </div>
 """)
 
@@ -597,8 +605,6 @@ for i, cat in enumerate(CATEGORIES):
     active = "active" if i == 0 else ""
     html_parts.append(f'  <div class="tab {active}" onclick="showTab(\'{cat["id"]}\')" id="tab_{cat["id"]}">{cat["label"]} <span style="font-size:11px;opacity:.7">({len(cat["funds"])})</span></div>\n')
 
-html_parts.append('  <div class="tab" onclick="showTab(\'portefeuilles\')" id="tab_portefeuilles">💼 Portefeuilles <span style="font-size:11px;opacity:.7">(3)</span></div>\n')
-html_parts.append('  <div class="tab" onclick="showTab(\'perso\')" id="tab_perso">👤 Perso</div>\n')
 html_parts.append("</div>\n")
 
 # ── Collect all chart data for JS ──────────────────────────────────────────────
@@ -1524,8 +1530,10 @@ function clearFilters() {{
 // ── Tab switching ──────────────────────────────────────────────────────────
 function showTab(id) {{
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.getElementById('tab_'+id).classList.add('active');
+  const tabEl = document.getElementById('tab_'+id);
+  if (tabEl) tabEl.classList.add('active');
   document.getElementById('sec_'+id).classList.add('active');
   // Force redraw after layout recalc (ResizeObserver unreliable on display:none → block)
   requestAnimationFrame(() => {{
