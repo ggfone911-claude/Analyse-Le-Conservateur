@@ -852,8 +852,8 @@ _PORTFOLIOS_DATA = [
         "range": "SRRI 1–3", "color_cls": "pru",
         "desc": "Horizon 3–5 ans · Préservation du capital · Rendement cible ~2–3%/an",
         "kpis": [
-            ("Perf. estim. 1 An", "+2,6 %", "pos"),
-            ("Perf. estim. 3 Ans", "+13,5 %", "pos"),
+            ("Perf. Boursorama 1 An", "—", ""),
+            ("Perf. Boursorama 3 Ans", "—", ""),
             ("SRRI moyen pond.", "2,0", ""),
             ("Fonds sélectionnés", "10", ""),
         ],
@@ -876,8 +876,8 @@ _PORTFOLIOS_DATA = [
         "range": "SRRI 1–5", "color_cls": "equ",
         "desc": "Horizon 5–7 ans · Croissance modérée · Rendement cible ~7–9%/an",
         "kpis": [
-            ("Perf. estim. 1 An", "+8,7 %", "pos"),
-            ("Perf. estim. 3 Ans", "+25,8 %", "pos"),
+            ("Perf. Boursorama 1 An", "—", ""),
+            ("Perf. Boursorama 3 Ans", "—", ""),
             ("SRRI moyen pond.", "4,1", ""),
             ("Fonds sélectionnés", "10", ""),
         ],
@@ -900,8 +900,8 @@ _PORTFOLIOS_DATA = [
         "range": "SRRI 1–7", "color_cls": "dyn",
         "desc": "Horizon 7–10 ans · Croissance forte · Rendement cible ~15–20%/an",
         "kpis": [
-            ("Perf. estim. 1 An", "+24,8 %", "pos"),
-            ("Perf. estim. 3 Ans", "+57,2 %", "pos"),
+            ("Perf. Boursorama 1 An", "—", ""),
+            ("Perf. Boursorama 3 Ans", "—", ""),
             ("SRRI moyen pond.", "5,9", ""),
             ("Fonds sélectionnés", "10", ""),
         ],
