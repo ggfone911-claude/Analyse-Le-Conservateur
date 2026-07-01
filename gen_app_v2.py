@@ -384,8 +384,7 @@ header p{font-size:13px;opacity:.8;margin-top:4px}
 .chart-wrap{background:#fff;border-radius:10px;padding:16px;margin-bottom:24px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .chart-wrap h3{font-size:14px;font-weight:600;color:#4a5568;margin-bottom:4px}
 .chart-wrap .chart-sub{font-size:11px;color:#a0aec0;margin-bottom:12px}
-.charts-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
-@media(max-width:900px){.charts-row{grid-template-columns:1fr}}
+.charts-row{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:24px}
 .table-wrap{background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:24px;overflow-x:auto}
 table{width:100%;border-collapse:collapse}
 thead tr{background:#f7fafc}
@@ -685,6 +684,8 @@ for i, cat in enumerate(CATEGORIES):
   <button class="period-btn active" data-cat="{cid}" data-period="12M" onclick="filterLinePeriod('{cid}','12M')">12 Mois</button>
   <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
   <button class="period-btn" data-cat="{cid}" data-period="3M" onclick="filterLinePeriod('{cid}','3M')">3 Mois</button>
+  <button class="period-btn" data-cat="{cid}" data-period="3A" onclick="filterLinePeriod('{cid}','3A')">3 Ans</button>
+  <button class="period-btn" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
 </div>'''
         _line_title = "Évolution VL — données réelles Boursorama"
     else:
@@ -763,12 +764,27 @@ for i, cat in enumerate(CATEGORIES):
                 "borderWidth": 2,
                 "pointRadius": 3,
             })
+        # Perf datasets (3A/5A fallback) pour le mode historique
+        _perf_ds_hist = []
+        for fi, f in enumerate(funds_sorted):
+            pts = [f.get("a5"), f.get("a3"), f.get("a1"), f.get("m6"), f.get("m1"), f.get("ytd")]
+            if sum(1 for p in pts if p is not None) < 2:
+                continue
+            _perf_ds_hist.append({
+                "label": f["name"][:35],
+                "data": pts, "fullData": pts,
+                "borderColor": LINE_PALETTE[fi % len(LINE_PALETTE)],
+                "borderWidth": 2, "pointRadius": 4,
+            })
         all_line_charts.append({
             "id": f"line_{cid}",
             "mode": "historical",
             "labels": line_labels,
             "weights": line_weights,
             "datasets": line_datasets,
+            "perfLabels": ['5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD'],
+            "perfWeights": [0.000, 0.400, 0.750, 0.900, 0.967, 1.000],
+            "perfDatasets": _perf_ds_hist,
         })
     else:
         # ── Mode performance : % cumulés bruts multi-horizons ────────────────
@@ -1622,7 +1638,10 @@ LINE_CHARTS.forEach(c => {{
     pointRadius: ds.pointRadius || 4
   }}));
   lineFullDs[catId] = builtDs;
-  lineMeta[catId]   = {{ mode: c.mode || 'performance', labels: allLabels, weights: allWeights }};
+  lineMeta[catId]   = {{ mode: c.mode || 'performance', labels: allLabels, weights: allWeights,
+    perfLabels: c.perfLabels || null, perfWeights: c.perfWeights || null,
+    perfDs: c.perfDatasets ? c.perfDatasets.map(ds => ({{...ds, fullData:(ds.fullData||ds.data).slice()}})) : null
+  }};
   lineInstances[catId] = new TinyChart(canvas, {{
     type:     'line',
     labels:   allLabels.slice(),
@@ -1638,9 +1657,26 @@ function filterLinePeriod(catId, period) {{
   const chart = lineInstances[catId];
   if (!chart) return;
   const meta       = lineMeta[catId] || {{}};
+  const mode       = meta.mode    || 'performance';
+
+  // Mode historique + période longue (3A/5A) → basculer sur les données de performance statiques
+  const isPerfPeriod = period === '3A' || period === '5A';
+  if (mode === 'historical' && isPerfPeriod && meta.perfDs && meta.perfLabels) {{
+    const start = PERF_START[period] || 0;
+    const labels = meta.perfLabels.slice(start);
+    const newDs  = meta.perfDs.map(ds => ({{ ...ds, data: ds.fullData.slice(start) }}));
+    let normW = null;
+    if (meta.perfWeights) {{
+      const rawW = meta.perfWeights.slice(start);
+      const wMin = rawW[0], wMax = rawW[rawW.length-1], wRange = wMax - wMin || 1;
+      normW = rawW.map(w => (w - wMin) / wRange);
+    }}
+    chart.setData(labels, newDs, normW);
+    return;
+  }}
+
   const allLabels  = meta.labels  || [];
   const allWeights = meta.weights || null;
-  const mode       = meta.mode    || 'performance';
 
   // Calculer l'indice de début selon le mode
   let start = 0;
