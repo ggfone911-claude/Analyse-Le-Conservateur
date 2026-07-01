@@ -106,7 +106,7 @@ _RAW = [
     ("FR0010135103","MP-829413","4.43,1.18,5.07,11.3,29.54,12.47,32.4,"),
     ("FR0010564336","MP-495318","2.58,1.16,3.32,9.16,22.4,13.49,27.18,"),
     ("FR0010057711","MP-495316","1.41,1.05,2.98,9.42,22.24,13.84,28.04"),
-    ("FR0007051040","MP-804518","1.28,1.9,1.74,4.8,18.36,21.76,33.86"),
+    ("LU0284394235","MP-420353","2.65,1.37,3.04,4.56,20.29,22.31,34.27"),
     ("FR0011199314","0P0000VYE0","1.92,0.56,1.63,7.14,23.99,7.8,31.18,"),
     ("FR0011199322","0P0000VYE1","1.36,1.39,2.19,8.71,21.02,10.85,28.39"),
     ("FR0010489542","MP-514618","2.6,2.0,2.77,4.91,21.15,13.35,26.91,"),
@@ -209,6 +209,8 @@ CATEGORIES = [
     {"isin":"FR0010915314","name":"LF Obligations Carbon Impact C","mgr":"La Française AM Int.","vl":26.99,"ytd":0.45,"srri":3},
     {"isin":"FR0010564328","name":"Conservateur Oblig. MT (C)","mgr":"Conservateur Gestion Valor","vl":301.51,"ytd":0.28,"srri":3},
     {"isin":"LU1752460292","name":"Oddo Sustainable Credit Optn CR","mgr":"Oddo AM","vl":114.46,"ytd":-0.39,"srri":3},
+    {"isin":"FR0013505450","name":"Tikehau 2027 (R-Acc-EUR)","mgr":"Tikehau IM","vl":123.44,"ytd":0.79,"srri":2},
+    {"isin":"FR001400K2B5","name":"Tikehau 2029 (R-Acc-EUR)","mgr":"Tikehau IM","vl":115.10,"ytd":0.76,"srri":2},
   ]},
   {"id":"oblig_horizon","label":"Oblig. à Horizon","color":"#1a3a6b","funds":[
     {"isin":"FR0013398294","name":"Conservateur Horizon 2027 (I)","mgr":"Conservateur Gestion Valor","vl":11896.04,"ytd":0.93,"srri":2},
@@ -221,7 +223,7 @@ CATEGORIES = [
     {"isin":"LU0512124107","name":"DNCA Invest - Convertibles (B)","mgr":"DNCA Finance","vl":191.32,"ytd":10.12,"srri":4},
     {"isin":"FR0010135103","name":"Carmignac Patrimoine (A)","mgr":"Carmignac Gestion","vl":819.36,"ytd":3.82,"srri":4},
     {"isin":"FR0010564336","name":"Conservateur Diversifié (C)","mgr":"Conservateur Gestion Valor","vl":212.52,"ytd":1.28,"srri":4},
-    {"isin":"FR0007051040","name":"DNCA Eurose (C)","mgr":"DNCA Finance","vl":474.81,"ytd":2.07,"srri":3},
+    {"isin":"LU0284394235","name":"DNCA Invest - Eurose (A)","mgr":"DNCA Finance","vl":199.00,"ytd":2.65,"srri":3},
     {"isin":"FR0011199314","name":"Conservateur Immo-Or (C)","mgr":"Conservateur Gestion Valor","vl":123.86,"ytd":-1.10,"srri":4},
     {"isin":"FR0010489542","name":"Conservateur Diversifié Réactif (C)","mgr":"Conservateur Gestion Valor","vl":190.52,"ytd":2.75,"srri":4},
     {"isin":"FR0007439666","name":"Congrégation Investissement (C)","mgr":"Conservateur Gestion Valor","vl":10560.83,"ytd":3.50,"srri":4},
@@ -403,6 +405,8 @@ tr.top3 td:first-child{font-weight:700}
 .isin-cell{font-family:monospace;font-size:11px;color:#a0aec0}
 .bourso-link{font-size:12px;color:#3266ad;text-decoration:none;display:inline-flex;align-items:center;gap:3px}
 .bourso-link:hover{text-decoration:underline}
+.fund-name-link{color:inherit;text-decoration:none;border-bottom:1px dotted #3266ad}
+.fund-name-link:hover{color:#3266ad;border-bottom-color:#3266ad}
 .source-note{font-size:11px;color:#a0aec0;margin-bottom:8px}
 .filter-bar{display:flex;gap:10px;padding:12px 32px;background:#fff;border-bottom:2px solid #e2e8f0;align-items:center;flex-wrap:wrap}
 .view-tabs{display:flex;gap:6px;align-items:center;margin-left:auto}
@@ -827,7 +831,7 @@ for i, cat in enumerate(CATEGORIES):
         bourso_cell = f'<a href="{bourso_url(bid)}" target="_blank" class="bourso-link">Voir →</a>' if bid else '<span class="na">—</span>'
         html_parts.append(f'''<tr class="{top3_cls}">
   <td data-val="{rank+1}">{medal(rank)}</td>
-  <td class="fund-name" data-val="{f['name']}">{f["name"]}<br><span class="isin-cell">{f["isin"]}</span></td>
+  <td class="fund-name" data-val="{f['name']}">{"<a href='" + bourso_url(bid) + "' target='_blank' class='fund-name-link'>" + f['name'] + "</a>" if bid else f["name"]}<br><span class="isin-cell">{f["isin"]}</span></td>
   <td data-val="{f['mgr']}">{f["mgr"]}</td>
   <td style="text-align:center" data-val="{srri}"><span class="srri-badge srri-{srri}">{srri}</span></td>
   <td style="text-align:right" data-val="{f['vl'] or 0}">{fmt_vl(f["vl"])}</td>
