@@ -295,6 +295,30 @@ CATEGORIES = [
   ]},
 ]
 
+# ── Indicateurs de risque depuis l'historique mensuel ────────────────────────
+def _risk_metrics(isin):
+    """Volatilité annualisée (%) et max drawdown (%) sur l'historique mensuel."""
+    pts = _HIST_DATA.get(isin)
+    if not pts:
+        return None, None
+    vls = [p["vl"] for p in sorted(pts, key=lambda x: x["date"]) if p.get("vl")]
+    if len(vls) < 4:
+        return None, None
+    rets = [vls[i] / vls[i-1] - 1 for i in range(1, len(vls))]
+    vol = None
+    if len(rets) >= 5:
+        m = sum(rets) / len(rets)
+        var = sum((r - m) ** 2 for r in rets) / (len(rets) - 1)
+        vol = round((var ** 0.5) * (12 ** 0.5) * 100, 2)
+    peak, mdd = vls[0], 0.0
+    for v in vls:
+        if v > peak:
+            peak = v
+        dd = (v / peak - 1) * 100
+        if dd < mdd:
+            mdd = dd
+    return vol, round(mdd, 2)
+
 # Merge Boursorama data into each fund
 for cat in CATEGORIES:
     for f in cat["funds"]:
@@ -316,6 +340,8 @@ for cat in CATEGORIES:
                 f["vl"] = round(ov["vl"], 4)
             if ov.get("ytd") is not None:
                 f["ytd"] = ov["ytd"]
+        # Indicateurs de risque (volatilité annualisée + max drawdown 12 mois)
+        f["vol"], f["mdd"] = _risk_metrics(f["isin"])
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -533,6 +559,23 @@ tr.top3 td:first-child{font-weight:700}
 .fs-ytd{font-size:12px;font-weight:600;white-space:nowrap;min-width:46px;text-align:right}
 #fs-search-row{margin-bottom:8px;position:sticky;top:0;background:#fff;padding-bottom:4px;z-index:1}
 .perso-empty{text-align:center;padding:32px;color:#a0aec0;font-style:italic;font-size:14px}
+.perso-total-row>td{background:#eef3fb!important;font-weight:700;border-top:2px solid #3266ad}
+.alloc-ok{color:#22863a}.alloc-warn{color:#d97706}.alloc-bad{color:#c0392b}
+.sim-box{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px 20px;margin-top:20px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.sim-title{font-size:15px;font-weight:700;color:#1a202c;margin-bottom:4px}
+.sim-hint{font-size:12px;color:#718096;margin-bottom:12px}
+.sim-row{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.sim-row label{font-size:12px;font-weight:600;color:#4a5568}
+.sim-row input{width:90px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;font-size:13px;text-align:right}
+.sim-row input:focus{border-color:#3266ad;outline:none}
+.sim-kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.sim-kpi{flex:1;min-width:130px;background:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px}
+.sim-kpi .lbl{font-size:11px;color:#718096;margin-bottom:3px}
+.sim-kpi .val{font-size:18px;font-weight:700;color:#1a202c}
+.sim-table{font-size:12px}
+.sim-table td,.sim-table th{padding:5px 10px}
+.sim-note{font-size:11px;color:#a0aec0;margin-top:8px;font-style:italic}
+@media print{.no-print{display:none!important}}
 </style>
 </head>
 <body>
@@ -594,6 +637,8 @@ html_parts.append("""<div class="filter-results" id="filterResults">
         <th style="text-align:right" onclick="sortTable('tblFiltered',8)">1 An</th>
         <th style="text-align:right" onclick="sortTable('tblFiltered',9)">3 Ans</th>
         <th style="text-align:right" onclick="sortTable('tblFiltered',10)">5 Ans</th>
+        <th style="text-align:right" onclick="sortTable('tblFiltered',11)" title="Volatilité annualisée 12 mois">Volat.</th>
+        <th style="text-align:right" onclick="sortTable('tblFiltered',12)" title="Perte maximale 12 mois">Max DD</th>
       </tr></thead>
       <tbody id="filteredBody"></tbody>
     </table>
@@ -862,79 +907,132 @@ for i, cat in enumerate(CATEGORIES):
 # ── Section Portefeuilles ──────────────────────────────────────────────────────
 _SRRI_COLORS_PTF = {1:"#22c55e",2:"#84cc16",3:"#eab308",4:"#f59e0b",5:"#f97316",6:"#ef4444",7:"#991b1b"}
 
-_PORTFOLIOS_DATA = [
+# Définition par ISIN + pondération — les perfs sont tirées automatiquement
+# des données fonds (VL/YTD scrapés quotidiennement + perfs Boursorama).
+# 15 lignes par profil.
+_PORTFOLIOS_DEF = [
     {
         "id": "pru", "label": "Prudent", "emoji": "🔵",
         "range": "SRRI 1–3", "color_cls": "pru",
         "desc": "Horizon 3–5 ans · Préservation du capital · Rendement cible ~2–3%/an",
-        "kpis": [
-            ("Perf. Boursorama 1 An", "—", ""),
-            ("Perf. Boursorama 3 Ans", "—", ""),
-            ("SRRI moyen pond.", "2,0", ""),
-            ("Fonds sélectionnés", "10", ""),
-        ],
-        "note": "25% SRRI1 (monétaire) · 45% SRRI2 (oblig. horizon) · 30% SRRI3 (diversifié prudent)",
+        "note": "20% SRRI1 (monétaire) · 45% SRRI2 (oblig. daté/horizon) · 35% SRRI3 (obligataire & diversifié prudent)",
         "funds": [
-            (1, "TF – Tikehau Short Duration (R)", 1, "+0,53%", "+2,06%", "+12,05%", "+9,42%", 10),
-            (2, "Palatine Monétaire Court Terme (R)", 1, "+0,88%", "+1,96%", "+9,37%", "+10,38%", 10),
-            (3, "Conservateur Oblig. CT (C)", 1, "+0,66%", "+1,99%", "+10,47%", "+7,49%", 5),
-            (4, "Conservateur Horizon 2031 (I)", 2, "+1,01%", "+3,61%", "—", "—", 20),
-            (5, "Conservateur Horizon 2027 (I)", 2, "+0,93%", "+2,27%", "+16,45%", "+9,94%", 15),
-            (6, "Oddo BHF Global Target 2026 (CR)", 2, "+0,77%", "+2,37%", "+13,38%", "+11,31%", 10),
-            (7, "DNCA Eurose (C)", 3, "+2,07%", "+4,80%", "+18,36%", "+21,76%", 15),
-            (8, "DNCA Invest Flex Inflation", 3, "+1,59%", "+2,95%", "+3,55%", "+12,54%", 10),
-            (9, "Conservateur Oblig. MT (C)", 3, "+0,28%", "+1,39%", "+12,18%", "+4,44%", 3),
-            (10, "Oddo Sustainable Credit Options (CR)", 3, "−0,39%", "+1,39%", "+12,20%", "+5,15%", 2),
+            ("FR0013287315", 8),   # Palatine Monétaire Court Terme (R)
+            ("FR0011461326", 5),   # Conservateur Oblig. CT (C)
+            ("LU1585265066", 7),   # TF - Tikehau Short Duration (R)
+            ("FR001400PKZ3", 12),  # Conservateur Horizon 2031 (I)
+            ("FR0013398294", 10),  # Conservateur Horizon 2027 (I)
+            ("FR0013426657", 6),   # Oddo BHF Global Target 2026 (CR)
+            ("FR0013505450", 6),   # Tikehau 2027
+            ("FR001400K2B5", 6),   # Tikehau 2029
+            ("FR0013398302", 5),   # Conservateur Horizon 2027 (C)
+            ("LU0284394235", 10),  # DNCA Invest - Eurose (A)
+            ("LU1694790202", 7),   # DNCA Invest Flex Inflation
+            ("LU1694789451", 6),   # DNCA Invest Alpha Bonds (A)
+            ("FR0010915314", 4),   # LF Obligations Carbon Impact C
+            ("FR0010564328", 4),   # Conservateur Oblig. MT (C)
+            ("LU1752460292", 4),   # Oddo Sustainable Credit Optn CR
         ]
     },
     {
         "id": "equ", "label": "Équilibré", "emoji": "🟢",
         "range": "SRRI 1–5", "color_cls": "equ",
         "desc": "Horizon 5–7 ans · Croissance modérée · Rendement cible ~7–9%/an",
-        "kpis": [
-            ("Perf. Boursorama 1 An", "—", ""),
-            ("Perf. Boursorama 3 Ans", "—", ""),
-            ("SRRI moyen pond.", "4,1", ""),
-            ("Fonds sélectionnés", "10", ""),
-        ],
-        "note": "15% SRRI2–3 (ancre défensive) · 55% SRRI4 (diversifiés) · 30% SRRI5 (actions flexibles)",
+        "note": "16% SRRI2–3 (ancre défensive) · 64% SRRI4 (diversifiés & flexibles) · 20% SRRI5 (actions flexibles)",
         "funds": [
-            (1, "Conservateur Horizon 2031 (I)", 2, "+1,01%", "+3,61%", "—", "—", 5),
-            (2, "DNCA Eurose (C)", 3, "+2,07%", "+4,80%", "+18,36%", "+21,76%", 10),
-            (3, "DNCA Invest Convertibles (B)", 4, "+10,12%", "+13,87%", "+32,52%", "+16,55%", 15),
-            (4, "Carmignac Patrimoine (A)", 4, "+3,82%", "+11,30%", "+29,54%", "+12,47%", 15),
-            (5, "CPR Croissance Réactive (P)", 4, "+1,16%", "+10,28%", "+20,34%", "+16,39%", 10),
-            (6, "Conservateur Diversifié (C)", 4, "+1,28%", "+9,16%", "+22,40%", "+13,49%", 10),
-            (7, "Congrégation Investissement (C)", 4, "+3,50%", "+5,04%", "+21,43%", "+15,88%", 10),
-            (8, "R-co Valor (C)", 5, "−4,94%", "+11,52%", "+39,66%", "+34,94%", 10),
-            (9, "Conservateur Actions Flexibles (C)", 5, "+5,13%", "+9,16%", "+29,28%", "—", 10),
+            ("FR001400PKZ3", 4),   # Conservateur Horizon 2031 (I)
+            ("LU0284394235", 8),   # DNCA Invest - Eurose (A)
+            ("LU1694789451", 4),   # DNCA Invest Alpha Bonds (A)
+            ("LU0512124107", 10),  # DNCA Invest - Convertibles (B)
+            ("FR0010135103", 10),  # Carmignac Patrimoine (A)
+            ("FR0010097683", 8),   # CPR Croissance Réactive (P)
+            ("FR0010564336", 8),   # Conservateur Diversifié (C)
+            ("FR0007439666", 8),   # Congrégation Investissement (C)
+            ("FR0010489542", 6),   # Conservateur Diversifié Réactif (C)
+            ("LU2147879543", 6),   # Tikehau International Cross Assets (R)
+            ("FR0010286013", 4),   # Sextant Grand Large (A)
+            ("FR0011199314", 4),   # Conservateur Immo-Or (C)
+            ("FR0010149179", 4),   # Carmignac Absolute Return Europe (A)
+            ("FR0011253624", 8),   # R-co Valor (C)
+            ("FR0013256930", 8),   # Conservateur Actions Flexibles (C)
         ]
     },
     {
         "id": "dyn", "label": "Dynamique", "emoji": "🔴",
         "range": "SRRI 1–7", "color_cls": "dyn",
         "desc": "Horizon 7–10 ans · Croissance forte · Rendement cible ~15–20%/an",
-        "kpis": [
-            ("Perf. Boursorama 1 An", "—", ""),
-            ("Perf. Boursorama 3 Ans", "—", ""),
-            ("SRRI moyen pond.", "5,9", ""),
-            ("Fonds sélectionnés", "10", ""),
-        ],
-        "note": "10% SRRI4 (ancre convertibles) · 65% SRRI6 (actions mondiales/thématiques) · 25% SRRI7 (croissance forte)",
+        "note": "6% SRRI4 (ancre convertibles) · 79% SRRI6 (actions mondiales/thématiques) · 15% SRRI7 (croissance forte)",
         "funds": [
-            (1, "DNCA Invest Convertibles (B)", 4, "+10,12%", "+13,87%", "+32,52%", "+16,55%", 10),
-            (2, "Carmignac Investissement (A)", 6, "+10,55%", "+32,95%", "+82,25%", "+58,21%", 15),
-            (3, "FF – World Fund (A)", 6, "+10,19%", "+23,56%", "+56,45%", "+58,77%", 15),
-            (4, "Magellan (C)", 6, "+24,37%", "+49,19%", "+55,35%", "+12,20%", 10),
-            (5, "Conservateur Actions Monde (C)", 6, "+8,13%", "+15,26%", "+44,08%", "+25,25%", 10),
-            (6, "OFI Croiss. Durable &amp; Solidaire (C)", 6, "+9,80%", "+14,09%", "+41,08%", "+39,97%", 10),
-            (7, "Centifolia (C)", 6, "+9,46%", "+13,61%", "+34,41%", "+54,99%", 5),
-            (8, "EdR Fund – Big Data (A)", 6, "+8,12%", "+15,88%", "+38,41%", "+23,84%", 5),
-            (9, "Echiquier Artificial Intelligence (B)", 7, "+24,11%", "+47,31%", "+122,88%", "+60,75%", 15),
-            (10, "Pictet Clean Energy Transition (P)", 7, "+37,29%", "+67,47%", "+78,55%", "+90,93%", 5),
+            ("LU0512124107", 6),   # DNCA Invest - Convertibles (B)
+            ("FR0010148981", 10),  # Carmignac Investissement (A)
+            ("LU1261432659", 10),  # FF - World Fund (A)
+            ("FR0000292278", 8),   # Magellan (C)
+            ("LU1819480192", 10),  # Echiquier Artificial Intelligence (B)
+            ("LU0280435388", 5),   # Pictet - Clean Energy Transition (P)
+            ("FR0010564229", 8),   # Conservateur Actions Monde (C)
+            ("FR0000983819", 7),   # OFI Croiss Durable & Solidaire C
+            ("FR0007076930", 5),   # Centifolia (C)
+            ("LU1244893696", 4),   # EdR Fund - Big Data (A)
+            ("FR0010649079", 7),   # Palatine Planète (R)
+            ("LU0115768185", 6),   # FF - Sustainable Asia Equity Fund (E)
+            ("FR0010106500", 5),   # Echiquier Excelsior A
+            ("FR0010298596", 5),   # Moneta Multi Caps (C)
+            ("LU1902443420", 4),   # CPR Invest Climate Action (A)
         ]
     },
 ]
+
+# ── Construction des portefeuilles à partir des données fonds ──────────────
+_FUND_BY_ISIN = {f["isin"]: f for cat in CATEGORIES for f in cat["funds"]}
+
+def _esc_html(s):
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def _fmt_ptf_val(v):
+    """float → '+2,06%' | None → '—' (format attendu par le rendu)"""
+    if v is None:
+        return "—"
+    s = f"{v:+.2f}%".replace(".", ",")
+    return s.replace("-", "−")
+
+_PORTFOLIOS_DATA = []
+for _pdef in _PORTFOLIOS_DEF:
+    _funds = []
+    _w_srri = 0.0
+    _tot_w = 0
+    for _isin, _pct in _pdef["funds"]:
+        _fd = _FUND_BY_ISIN.get(_isin)
+        if not _fd:
+            print(f"⚠️  Portefeuille {_pdef['label']} : ISIN {_isin} introuvable — ignoré")
+            continue
+        _funds.append((
+            len(_funds) + 1,
+            _esc_html(_fd["name"]),
+            _fd.get("srri") or 4,
+            _fmt_ptf_val(_fd.get("ytd")),
+            _fmt_ptf_val(_fd.get("a1")),
+            _fmt_ptf_val(_fd.get("a3")),
+            _fmt_ptf_val(_fd.get("a5")),
+            _pct,
+            _fd.get("vol"),
+            _fd.get("mdd"),
+        ))
+        _w_srri += (_fd.get("srri") or 4) * _pct
+        _tot_w += _pct
+    if _tot_w != 100:
+        print(f"⚠️  Portefeuille {_pdef['label']} : somme des pondérations = {_tot_w}% (≠ 100%)")
+    _srri_moy = _w_srri / _tot_w if _tot_w else 0
+    _PORTFOLIOS_DATA.append({
+        **{k: _pdef[k] for k in ("id", "label", "emoji", "range", "color_cls", "desc", "note")},
+        "kpis": [
+            ("Perf. pondérée 1 An", "—", ""),
+            ("Perf. pondérée 3 Ans", "—", ""),
+            ("Volatilité 1 An (pond.)", "—", ""),
+            ("SRRI moyen pond.", f"{_srri_moy:.1f}".replace(".", ","), ""),
+            ("Fonds sélectionnés", str(len(_funds)), ""),
+        ],
+        "funds": _funds,
+    })
 
 # ── Tri des fonds UC par performance 1 an décroissante ────────────────────
 def _a1_sort_key(fund_tuple):
@@ -977,20 +1075,24 @@ def _parse_pct(s):
 _ptf_js_dict = {}
 for _ptf in _PORTFOLIOS_DATA:
     _funds_arr = []
-    for _rank, _name, _srri, _ytd_s, _a1_s, _a3_s, _a5_s, _pct in _ptf["funds"]:
+    for _rank, _name, _srri, _ytd_s, _a1_s, _a3_s, _a5_s, _pct, _vol, _mdd in _ptf["funds"]:
         _funds_arr.append({
+            "name": _name,
+            "srri": _srri,
             "pct": _pct,
             "ytd": _parse_pct(_ytd_s),
             "a1":  _parse_pct(_a1_s),
             "a3":  _parse_pct(_a3_s),
             "a5":  _parse_pct(_a5_s),
+            "vol": _vol,
+            "mdd": _mdd,
         })
-    _ptf_js_dict[_ptf["id"]] = {"cc": _ptf["color_cls"], "funds": _funds_arr}
+    _ptf_js_dict[_ptf["id"]] = {"cc": _ptf["color_cls"], "label": _ptf["label"], "funds": _funds_arr}
 _PTF_DATA_JS = json.dumps(_ptf_js_dict, ensure_ascii=False)
 
 html_parts.append('<div class="section" id="sec_portefeuilles">\n')
 html_parts.append('<div class="cat-header"><h2>💼 Portefeuilles Optimisés</h2><span class="badge">3 profils de risque</span></div>\n')
-html_parts.append(f'<div class="source-note">📅 Construit sur la base des performances Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)} — Sélection et pondération optimisée des 10 meilleurs fonds par profil SRRI</div>\n')
+html_parts.append(f'<div class="source-note">📅 Construit sur la base des performances Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)} — Sélection et pondération optimisée de 15 fonds par profil SRRI · Perfs mises à jour automatiquement</div>\n')
 
 # ── Fonds en Euros controls ────────────────────────────────────────────────
 html_parts.append('''<div class="fe-controls">
@@ -1047,9 +1149,11 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
     html_parts.append(f'  <div class="ptf-title ptf-t-{cc}">{ptf["emoji"]} Portefeuille {ptf["label"]}</div>\n')
     html_parts.append(f'  <div class="ptf-sub ptf-s-{cc}">{ptf["desc"]}</div>\n')
     html_parts.append('  <div class="ptf-kpis">\n')
+    _kpi_ids = {0: "a1", 1: "a3", 2: "vol"}
     for ki, (lbl, val, cls) in enumerate(ptf["kpis"]):
-        kid_attr = f' id="kpi-a{"1" if ki==0 else "3"}-{ptf["id"]}"' if ki < 2 else ''
+        kid_attr = f' id="kpi-{_kpi_ids[ki]}-{ptf["id"]}"' if ki in _kpi_ids else ''
         html_parts.append(f'    <div class="ptf-kpi"><div class="ptf-kpi-lbl">{lbl}</div><div class="ptf-kpi-val {cls}"{kid_attr}>{val}</div></div>\n')
+    html_parts.append(f'  <div style="margin-top:10px"><button class="perso-action-btn" onclick="printPortfolio(\'{ptf["id"]}\')">🖨️ Imprimer / PDF</button></div>\n')
     html_parts.append('  </div>\n</div>\n')
 
     html_parts.append('<div class="table-wrap" style="border-radius:0 0 10px 10px;margin-top:0">\n')
@@ -1061,6 +1165,8 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
     html_parts.append('  <th style="text-align:right;width:60px">1 An</th>\n')
     html_parts.append('  <th style="text-align:right;width:60px">3 Ans</th>\n')
     html_parts.append('  <th style="text-align:right;width:60px">5 Ans</th>\n')
+    html_parts.append('  <th style="text-align:right;width:58px" title="Volatilité annualisée sur 12 mois">Volat.</th>\n')
+    html_parts.append('  <th style="text-align:right;width:58px" title="Perte maximale sur 12 mois">Max DD</th>\n')
     html_parts.append('  <th style="width:110px">Allocation</th>\n')
     html_parts.append('</tr></thead>\n<tbody>\n')
 
@@ -1074,6 +1180,8 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
   <td style="text-align:right" id="fe-a1-{ptf["id"]}">—</td>
   <td style="text-align:right" id="fe-a3-{ptf["id"]}">—</td>
   <td style="text-align:right" id="fe-a5-{ptf["id"]}">—</td>
+  <td style="text-align:right;color:#a0aec0">≈0</td>
+  <td style="text-align:right;color:#a0aec0">0</td>
   <td id="fe-alloc-{ptf["id"]}"><div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-fe" style="width:84px"></div><span style="font-size:12px;font-weight:600;min-width:28px">30 %</span></div></td>
 </tr>\n''')
 
@@ -1086,16 +1194,21 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
   <td style="text-align:right" id="dop-a1-{ptf["id"]}">—</td>
   <td style="text-align:right" id="dop-a3-{ptf["id"]}">—</td>
   <td style="text-align:right" id="dop-a5-{ptf["id"]}">—</td>
+  <td style="text-align:right;color:#a0aec0">≈0</td>
+  <td style="text-align:right;color:#a0aec0">0</td>
   <td id="dop-alloc-{ptf["id"]}"><span style="color:#cbd5e0;font-size:12px;padding-left:4px">—</span></td>
 </tr>\n''')
 
-    for rank, name, srri, ytd, a1, a3, a5, pct in ptf["funds"]:
+    for rank, name, srri, ytd, a1, a3, a5, pct, vol, mdd in ptf["funds"]:
         sc = _SRRI_COLORS_PTF.get(srri, "#94a3b8")
         bar_w = pct * 3
         _ytd_f = _parse_pct(ytd); _a1_f = _parse_pct(a1)
         _a3_f  = _parse_pct(a3);  _a5_f = _parse_pct(a5)
         def _dv(v): return str(v) if v is not None else "null"
         _ftype_lbl = _FTYPE_LABELS.get(srri, "")
+        _vol_html = f'{vol:.1f}%'.replace(".", ",") if vol is not None else '<span class="na">—</span>'
+        _mdd_html = (f'<span class="neg">{mdd:.1f}%</span>'.replace(".", ",") if mdd is not None and mdd < 0
+                     else ('0,0%' if mdd is not None else '<span class="na">—</span>'))
         html_parts.append(f'''<tr class="uc-row ftype-{srri}" data-pct="{pct}" data-ytd="{_dv(_ytd_f)}" data-a1="{_dv(_a1_f)}" data-a3="{_dv(_a3_f)}" data-a5="{_dv(_a5_f)}">
   <td style="text-align:center;padding:0 4px"><input type="checkbox" class="chk-fund" id="chk-{cc}-{rank}" checked onchange="updateFE()"></td>
   <td style="font-size:11px;color:#a0aec0">{rank}</td>
@@ -1105,6 +1218,8 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
   <td style="text-align:right">{_ptf_perf(a1)}</td>
   <td style="text-align:right">{_ptf_perf(a3)}</td>
   <td style="text-align:right">{_ptf_perf(a5)}</td>
+  <td style="text-align:right;font-size:12px;color:#718096">{_vol_html}</td>
+  <td style="text-align:right;font-size:12px">{_mdd_html}</td>
   <td id="alloc-{cc}-{rank}"><div class="alloc-wrap"><div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-{cc}" id="bar-{cc}-{rank}" style="width:{bar_w}px"></div><span id="pct-{cc}-{rank}" style="font-size:12px;font-weight:600;min-width:28px">{pct}&nbsp;%</span></div><input type="number" class="manual-alloc" id="minput-{cc}-{rank}" min="0" max="100" step="0.5" placeholder="%" oninput="updateFE()" title="Allocation manuelle — laisser vide pour auto"></div></td>
 </tr>\n''')
 
@@ -1112,13 +1227,33 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
     html_parts.append(f'<p style="font-size:11px;color:#a0aec0;margin-top:8px;padding:0 4px">{ptf["note"]}. Performances passées cumulées, non garanties.</p>\n')
     html_parts.append('</div>\n')  # end ptf-panel
 
+# ── Simulateur de projection (générique, réutilisé pour types & perso) ──────
+def _sim_block(prefix, note):
+    return f'''<div class="sim-box">
+  <div class="sim-title">📈 Simulateur de projection</div>
+  <div class="sim-hint" id="sim{prefix}-hint">{note}</div>
+  <div class="sim-row">
+    <label>Versement initial</label><input id="sim{prefix}-init" type="number" min="0" step="500" value="10000" oninput="simCompute('{prefix}')"><span style="font-size:12px">€</span>
+    <label>Versement mensuel</label><input id="sim{prefix}-monthly" type="number" min="0" step="50" value="200" oninput="simCompute('{prefix}')"><span style="font-size:12px">€</span>
+    <label>Horizon</label><input id="sim{prefix}-years" type="number" min="1" max="40" value="10" oninput="simCompute('{prefix}')"><span style="font-size:12px">ans</span>
+    <label>Rendement annuel</label><input id="sim{prefix}-rate" type="number" step="0.1" value="5.0" oninput="simCompute('{prefix}')"><span style="font-size:12px">%</span>
+    <button class="perso-action-btn primary" onclick="simUseActive('{prefix}')">↺ Utiliser le portefeuille affiché</button>
+  </div>
+  <div class="sim-kpis" id="sim{prefix}-kpis"></div>
+  <div class="table-wrap" style="margin-bottom:0"><table class="sim-table" id="sim{prefix}-table"></table></div>
+  <div class="sim-note">Projection théorique à rendement constant, hors frais et fiscalité. Les performances passées ne préjugent pas des performances futures.</div>
+</div>\n'''
+
+html_parts.append(_sim_block("T", "Basé sur le rendement pondéré du portefeuille type affiché (1 an, ou 3 ans annualisé)."))
 html_parts.append('</div>\n')  # end sec_portefeuilles
 
 # ── Section Portefeuille Perso ────────────────────────────────────────────────
 html_parts.append('''<div class="section" id="sec_perso">
   <div class="perso-tab-bar" id="perso-tab-bar"></div>
   <div id="perso-panels"></div>
-</div>
+''')
+html_parts.append(_sim_block("P", "Basé sur le rendement pondéré du portefeuille perso affiché."))
+html_parts.append('''</div>
 
 <div class="perso-modal-overlay hidden" id="perso-modal">
   <div class="perso-modal-box">
@@ -1150,6 +1285,7 @@ for cat in CATEGORIES:
             "ytd": f.get("ytd"), "m1": f.get("m1"), "m6": f.get("m6"),
             "a1": f.get("a1"), "a3": f.get("a3"), "a5": f.get("a5"),
             "bid": f.get("bid"),
+            "vol": f.get("vol"), "mdd": f.get("mdd"),
         })
 all_funds_js = json.dumps(all_funds_list, ensure_ascii=False)
 
@@ -1522,6 +1658,8 @@ function applyFilters() {{
       <td style="text-align:right" data-val="${'{f.a1 ?? -9999}'}">${{fmt(f.a1)}}</td>
       <td style="text-align:right" data-val="${'{f.a3 ?? -9999}'}">${{fmt(f.a3)}}</td>
       <td style="text-align:right" data-val="${'{f.a5 ?? -9999}'}">${{fmt(f.a5)}}</td>
+      <td style="text-align:right;color:#718096" data-val="${'{f.vol ?? -9999}'}">${{f.vol != null ? f.vol.toFixed(1).replace('.',',') + '%' : '<span class="na">—</span>'}}</td>
+      <td style="text-align:right" data-val="${'{f.mdd ?? -9999}'}">${{f.mdd != null ? (f.mdd < 0 ? '<span class="neg">' + f.mdd.toFixed(1).replace('.',',') + '%</span>' : '0,0%') : '<span class="na">—</span>'}}</td>
     </tr>`;
   }}).join('');
 }}
@@ -1706,6 +1844,7 @@ function ptfShow(id) {{
   if (btn) btn.classList.add('active');
   const panel = document.getElementById('ptf_'+id);
   if (panel) panel.classList.add('active');
+  if (typeof simSync === 'function') simSync('T');
 }}
 
 // ── Resize fenêtre (debounce 120ms — sans boucle) ─────────────────────────
@@ -1887,7 +2026,7 @@ function updateFE() {{
     }});
 
     // ── KPI blended : FE + DOP + UC (pondéré par allocations réelles)
-    let sumW_a1 = 0, sumW_a3 = 0, totW = 0, totW3 = 0;
+    let sumW_a1 = 0, sumW_a3 = 0, sumW_vol = 0, totW = 0, totW3 = 0, totWv = 0;
     pd.funds.forEach((f, i) => {{
       const rank = i + 1;
       const chk  = document.getElementById('chk-' + pd.cc + '-' + rank);
@@ -1895,22 +2034,174 @@ function updateFE() {{
       const w = actualAllocs[rank] || 0;
       if (f.a1 != null && w > 0) {{ sumW_a1 += w * f.a1; totW  += w; }}
       if (f.a3 != null && w > 0) {{ sumW_a3 += w * f.a3; totW3 += w; }}
+      if (f.vol != null && w > 0) {{ sumW_vol += w * f.vol; totWv += w; }}
     }});
     if (totW  === 0) totW  = 100;
     if (totW3 === 0) totW3 = 100;
     const blend_a1 = feAlloc / 100 * fePerfs.a1 + dopAlloc / 100 * dopPerfs.a1 + ucScale * (sumW_a1 / totW);
     const blend_a3 = feAlloc / 100 * fePerfs.a3 + dopAlloc / 100 * dopPerfs.a3 + ucScale * (sumW_a3 / totW3);
+    // Volatilité pondérée : FE et DOP ≈ 0 → contribution UC uniquement (approx. hors corrélations)
+    const blend_vol = totWv > 0 ? ucScale * (sumW_vol / totWv) : null;
 
     const k1 = document.getElementById('kpi-a1-' + pid);
     const k3 = document.getElementById('kpi-a3-' + pid);
+    const kv = document.getElementById('kpi-vol-' + pid);
     if (k1) k1.innerHTML = fmtKpi(blend_a1);
     if (k3) k3.innerHTML = fmtKpi(blend_a3);
+    if (kv) kv.innerHTML = blend_vol != null
+      ? blend_vol.toFixed(1).replace('.', ',') + '&nbsp;%'
+      : '<span class="na">—</span>';
+
+    // Mémorise le rendement 1 an pondéré pour le simulateur
+    window._PTF_BLENDED = window._PTF_BLENDED || {{}};
+    window._PTF_BLENDED[pid] = {{ a1: blend_a1, a3: blend_a3 }};
   }});
+  if (typeof simSync === 'function') simSync('T');
 }}
 </script>
 </body>
 </html>
 """)
+
+html_parts.append("""<script>
+/* ===================================================================
+   Utilitaires : impression / PDF + simulateur de projection
+   =================================================================== */
+function openPrintDoc(title, rows, tot) {
+  const fmtP = v => v==null ? '—' : (v>=0?'+':'')+v.toFixed(2).replace('.',',')+' %';
+  const today = new Date().toLocaleDateString('fr-FR');
+  let trs = rows.map(r => '<tr>'
+    +'<td>'+r.name+(r.isin?' <span class="isin">'+r.isin+'</span>':'')+(r.note?' <span class="isin">— '+r.note+'</span>':'')+'</td>'
+    +'<td style="text-align:center">'+(r.srri||'—')+'</td>'
+    +'<td class="r">'+fmtP(r.ytd)+'</td>'
+    +'<td class="r">'+fmtP(r.a1)+'</td>'
+    +'<td class="r">'+fmtP(r.a3)+'</td>'
+    +'<td class="r">'+fmtP(r.a5)+'</td>'
+    +'<td class="r">'+(r.vol!=null?r.vol.toFixed(1).replace('.',',')+' %':'—')+'</td>'
+    +'<td class="r"><strong>'+(r.alloc!=null?r.alloc.toFixed(1).replace('.',',')+' %':'—')+'</strong></td>'
+    +'</tr>').join('');
+  if (tot && tot.a1 != null) {
+    trs += '<tr class="tot"><td>Total portefeuille (pondéré)</td><td></td><td></td>'
+      +'<td class="r">'+fmtP(tot.a1)+'</td><td class="r">'+fmtP(tot.a3)+'</td><td></td><td></td><td class="r">100 %</td></tr>';
+  }
+  const css = 'body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#1a202c;padding:28px;font-size:12px}'
+    +'h1{font-size:18px;color:#1a3a6b;margin-bottom:2px}'
+    +'.sub{font-size:11px;color:#718096;margin-bottom:18px}'
+    +'table{width:100%;border-collapse:collapse;margin-bottom:16px}'
+    +'th{background:#f0f4f8;text-align:left;padding:7px 8px;font-size:11px;border-bottom:2px solid #3266ad}'
+    +'td{padding:6px 8px;border-bottom:1px solid #e2e8f0}'
+    +'.r{text-align:right}.isin{font-size:10px;color:#a0aec0}'
+    +'.tot td{background:#eef3fb;font-weight:700;border-top:2px solid #3266ad}'
+    +'.legal{font-size:10px;color:#718096;font-style:italic;margin-top:18px;border-top:1px solid #e2e8f0;padding-top:10px}';
+  const html = '<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8"><title>'+title+'</title>'
+    +'<style>'+css+'</style></head><body>'
+    +'<h1>Le Conservateur — '+title+'</h1>'
+    +'<div class="sub">Édité le '+today+' · Performances Boursorama · Volatilité et allocations indicatives</div>'
+    +'<table><thead><tr><th>Fonds</th><th style="text-align:center">SRRI</th><th class="r">YTD</th><th class="r">1 An</th>'
+    +'<th class="r">3 Ans</th><th class="r">5 Ans</th><th class="r">Volat. 1A</th><th class="r">Allocation</th></tr></thead>'
+    +'<tbody>'+trs+'</tbody></table>'
+    +'<div class="legal">Les performances passées ne préjugent pas des performances futures. '
+    +'L\\'assureur ne s\\'engage que sur le nombre d\\'unités de compte et non sur leur valeur. '
+    +'Document établi à titre informatif — ne constitue pas un conseil en investissement.</div>'
+    +'<scr'+'ipt>window.onload=function(){window.print()}</scr'+'ipt></body></html>';
+  const w = window.open('', '_blank');
+  if (!w) { alert('Autorisez les pop-ups pour imprimer.'); return; }
+  w.document.write(html);
+  w.document.close();
+}
+
+function printPortfolio(pid) {
+  const pd = _PTF_DATA[pid]; if (!pd) return;
+  const feAlloc  = parseInt(document.getElementById('feSlider')?.value)  || 30;
+  const dopAlloc = parseInt(document.getElementById('dopSlider')?.value) || 0;
+  const taux = _getFERate(100 - feAlloc);
+  const rows = [];
+  rows.push({name:'Fonds en Euros', srri:1, ytd:null, a1:taux,
+    a3:(Math.pow(1+taux/100,3)-1)*100, a5:(Math.pow(1+taux/100,5)-1)*100,
+    alloc:feAlloc, note:'Taux 2025 : '+taux.toFixed(2).replace('.',',')+' %'});
+  if (dopAlloc > 0) rows.push({name:'DOP (taux fixe 5,00 %/an)', srri:2, ytd:null, a1:5, a3:15, a5:25, alloc:dopAlloc});
+  pd.funds.forEach((f, i) => {
+    const rank = i + 1;
+    const chk = document.getElementById('chk-'+pd.cc+'-'+rank);
+    if (chk && !chk.checked) return;
+    const pctEl = document.getElementById('pct-'+pd.cc+'-'+rank);
+    let alloc = pctEl ? parseFloat(pctEl.textContent.replace(',','.')) : f.pct;
+    if (isNaN(alloc)) alloc = null;
+    rows.push({name:f.name, srri:f.srri, ytd:f.ytd, a1:f.a1, a3:f.a3, a5:f.a5, vol:f.vol, alloc:alloc});
+  });
+  const tot = (window._PTF_BLENDED||{})[pid] || {};
+  openPrintDoc('Portefeuille type « '+pd.label+' »', rows, tot);
+}
+
+/* ── Simulateur ─────────────────────────────────────────────────── */
+function _activeBlended(prefix) {
+  if (prefix === 'T') {
+    const panel = document.querySelector('.ptf-panel.active');
+    const pid = panel ? panel.id.replace('ptf_','') : null;
+    return pid ? (window._PTF_BLENDED||{})[pid] : null;
+  }
+  const panel = document.querySelector('.perso-panel.active');
+  const pid = panel ? panel.dataset.id : null;
+  return pid ? (window._PERSO_BLENDED||{})[pid] : null;
+}
+
+function simCompute(prefix) {
+  const g = id => document.getElementById('sim'+prefix+'-'+id);
+  if (!g('init')) return;
+  const init    = parseFloat(g('init').value)    || 0;
+  const monthly = parseFloat(g('monthly').value) || 0;
+  const years   = Math.max(1, Math.min(40, parseInt(g('years').value)||10));
+  const rate    = parseFloat(g('rate').value)    || 0;
+  const rm = Math.pow(1+rate/100, 1/12) - 1;
+  let cap = init, invested = init;
+  const yearRows = [];
+  for (let m = 1; m <= years*12; m++) {
+    cap = cap*(1+rm) + monthly; invested += monthly;
+    if (m % 12 === 0) yearRows.push({y:m/12, cap, invested});
+  }
+  const fmtE = v => Math.round(v).toLocaleString('fr-FR') + ' €';
+  const gains = cap - invested;
+  g('kpis').innerHTML =
+    '<div class="sim-kpi"><div class="lbl">Capital projeté ('+years+' ans)</div><div class="val">'+fmtE(cap)+'</div></div>'
+    +'<div class="sim-kpi"><div class="lbl">Total versé</div><div class="val">'+fmtE(invested)+'</div></div>'
+    +'<div class="sim-kpi"><div class="lbl">Gains théoriques</div><div class="val '+(gains>=0?'pos':'neg')+'">'+(gains>=0?'+':'−')+fmtE(Math.abs(gains))+'</div></div>';
+  const step = years > 12 ? Math.ceil(years/12) : 1;
+  let rows = '<thead><tr><th>Année</th><th style="text-align:right">Versé cumulé</th><th style="text-align:right">Capital projeté</th><th style="text-align:right">Gains</th></tr></thead><tbody>';
+  yearRows.forEach(r => {
+    if (r.y % step !== 0 && r.y !== years) return;
+    const gn = r.cap - r.invested;
+    rows += '<tr><td>'+r.y+'</td><td style="text-align:right">'+fmtE(r.invested)+'</td>'
+      +'<td style="text-align:right"><strong>'+fmtE(r.cap)+'</strong></td>'
+      +'<td style="text-align:right" class="'+(gn>=0?'pos':'neg')+'">'+(gn>=0?'+':'−')+fmtE(Math.abs(gn))+'</td></tr>';
+  });
+  g('table').innerHTML = rows + '</tbody>';
+}
+
+function simUseActive(prefix) {
+  const b = _activeBlended(prefix);
+  if (!b || b.a1 == null) { alert('Aucun portefeuille actif ou données insuffisantes.'); return; }
+  const a3ann = b.a3 != null ? (Math.pow(1+b.a3/100, 1/3)-1)*100 : null;
+  const rate = a3ann != null ? a3ann : b.a1;
+  document.getElementById('sim'+prefix+'-rate').value = rate.toFixed(1);
+  simCompute(prefix);
+}
+
+function simSync(prefix) {
+  const b = _activeBlended(prefix);
+  const hint = document.getElementById('sim'+prefix+'-hint');
+  if (hint && b && b.a1 != null) {
+    const a3ann = b.a3 != null ? (Math.pow(1+b.a3/100, 1/3)-1)*100 : null;
+    hint.textContent = 'Portefeuille affiché : '+(b.a1>=0?'+':'')+b.a1.toFixed(1).replace('.',',')+' % sur 1 an'
+      + (a3ann != null ? ' · '+(a3ann>=0?'+':'')+a3ann.toFixed(1).replace('.',',')+' %/an (3 ans annualisé)' : '')
+      + ' — bouton « Utiliser le portefeuille affiché » pour reprendre ce taux.';
+  }
+  simCompute(prefix);
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ()=>{ simCompute('T'); simCompute('P'); });
+} else { simCompute('T'); simCompute('P'); }
+</script>""")
 
 html_parts.append("""<script>
 /* ===================================================================
@@ -1997,6 +2288,7 @@ const PersoMgr = (function() {
     active = id;
     document.querySelectorAll('.perso-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.id===id));
     document.querySelectorAll('.perso-panel').forEach(p => p.classList.toggle('active', p.dataset.id===id));
+    if (typeof simSync === 'function') simSync('P');
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -2043,18 +2335,20 @@ const PersoMgr = (function() {
 
     let tbody = '';
     if (!p.funds.length) {
-      tbody = '<tr><td colspan="9" class="perso-empty">Aucun fonds sélectionné — cliquez sur "Modifier les fonds"</td></tr>';
+      tbody = '<tr><td colspan="10" class="perso-empty">Aucun fonds sélectionné — cliquez sur "Modifier les fonds"</td></tr>';
     } else {
       tbody += `<tr class="fe-row">
         <td></td><td style="font-size:13px;text-align:center">★</td>
         <td class="fund-name">🏦 Fonds en Euros</td><td>SRRI 1</td>
         <td id="pfe-ytd-${id}">—</td><td id="pfe-a1-${id}">—</td><td id="pfe-a3-${id}">—</td><td id="pfe-a5-${id}">—</td>
+        <td style="text-align:right;color:#a0aec0;font-size:12px">≈0</td>
         <td id="pfe-alloc-${id}"><div class="ptf-pct-bar"><div class="ptf-mini-bar ptf-bar-fe" style="width:${Math.round(feAlloc*2.04)}px"></div><span style="font-size:12px;font-weight:600">${feAlloc}&nbsp;%</span></div></td>
       </tr>`;
       tbody += `<tr class="dop-row">
         <td></td><td style="font-size:13px;text-align:center">★</td>
         <td class="fund-name">💎 DOP</td><td>SRRI 2</td>
         <td id="pdop-ytd-${id}">—</td><td id="pdop-a1-${id}">—</td><td id="pdop-a3-${id}">—</td><td id="pdop-a5-${id}">—</td>
+        <td style="text-align:right;color:#a0aec0;font-size:12px">≈0</td>
         <td id="pdop-alloc-${id}"><span style="color:#cbd5e0;font-size:12px">—</span></td>
       </tr>`;
       p.funds.forEach((fi, idx) => {
@@ -2072,6 +2366,7 @@ const PersoMgr = (function() {
           <td style="text-align:right">${fmtV(fd.a1)}</td>
           <td style="text-align:right">${fmtV(fd.a3)}</td>
           <td style="text-align:right">${fmtV(fd.a5)}</td>
+          <td style="text-align:right;font-size:12px;color:#718096">${fd.vol!=null?fd.vol.toFixed(1).replace('.',',')+'%':'—'}</td>
           <td><div class="alloc-wrap">
             <div class="ptf-pct-bar">
               <div class="ptf-mini-bar ptf-bar-perso" id="perso-bar-${id}-${ik}" style="width:30px"></div>
@@ -2082,6 +2377,17 @@ const PersoMgr = (function() {
           </div></td>
         </tr>`;
       });
+      tbody += `<tr class="perso-total-row">
+        <td></td><td style="text-align:center">Σ</td>
+        <td class="fund-name">Total portefeuille</td>
+        <td style="text-align:center" id="ptot-srri-${id}">—</td>
+        <td style="text-align:right" id="ptot-ytd-${id}">—</td>
+        <td style="text-align:right" id="ptot-a1-${id}">—</td>
+        <td style="text-align:right" id="ptot-a3-${id}">—</td>
+        <td style="text-align:right" id="ptot-a5-${id}">—</td>
+        <td style="text-align:right;font-size:12px" id="ptot-vol-${id}">—</td>
+        <td id="ptot-alloc-${id}">—</td>
+      </tr>`;
     }
 
     // Onglets de portefeuille (tous les portefeuilles, celui-ci actif)
@@ -2099,16 +2405,20 @@ const PersoMgr = (function() {
               <th rowspan="2" style="font-size:11px">#</th>
               <th rowspan="2">Fonds</th>
               <th rowspan="2" style="text-align:center">SRRI</th>
-              <th colspan="5" style="padding:4px 6px 4px 6px;border-bottom:1px solid #e2e8f0">
+              <th colspan="6" style="padding:4px 6px 4px 6px;border-bottom:1px solid #e2e8f0">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap">
                   <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
                     ${tabBtns}
                   </div>
-                  <div style="display:flex;gap:4px;align-items:center">
+                  <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
                     <button class="perso-action-btn" onclick="PersoMgr.rename('${id}')">✏️ Renommer</button>
                     <button class="perso-action-btn primary" onclick="PersoMgr.openSelector('${id}')">🔍 Modifier</button>
-                    <button class="perso-action-btn" onclick="PersoMgr.duplicate('${id}')">📋</button>
-                    <button class="perso-action-btn danger" onclick="PersoMgr.deletePortfolio('${id}')">🗑️</button>
+                    <button class="perso-action-btn" onclick="PersoMgr.duplicate('${id}')" title="Dupliquer">📋</button>
+                    <button class="perso-action-btn" onclick="PersoMgr.exportJson('${id}')" title="Exporter en fichier JSON">💾</button>
+                    <button class="perso-action-btn" onclick="PersoMgr.importJson()" title="Importer un fichier JSON">📥</button>
+                    <button class="perso-action-btn" onclick="PersoMgr.shareLink('${id}')" title="Copier un lien de partage">🔗</button>
+                    <button class="perso-action-btn" onclick="PersoMgr.printPerso('${id}')" title="Imprimer / PDF">🖨️</button>
+                    <button class="perso-action-btn danger" onclick="PersoMgr.deletePortfolio('${id}')" title="Supprimer">🗑️</button>
                   </div>
                 </div>
               </th>
@@ -2118,6 +2428,7 @@ const PersoMgr = (function() {
               <th style="text-align:right;font-size:11px">1 An</th>
               <th style="text-align:right;font-size:11px">3 Ans</th>
               <th style="text-align:right;font-size:11px">5 Ans</th>
+              <th style="text-align:right;font-size:11px" title="Volatilité annualisée 12 mois">Volat.</th>
               <th style="font-size:11px">Allocation</th>
             </tr>
           </thead>
@@ -2170,6 +2481,8 @@ const PersoMgr = (function() {
     const overflow=manSum>ucPct;
     const eachAuto=autoCnt>0?Math.round(autoSpace/autoCnt*10)/10:0;
 
+    const sums={ytd:[0,0],a1:[0,0],a3:[0,0],a5:[0,0],vol:[0,0]};
+    let ucAllocSum=0, srriW=feAlloc*1+dopAlloc*2;
     p.funds.forEach(fi=>{
       const ik=isinKey(fi.isin);
       const {sel,isM,mv}=meta[ik]||{};
@@ -2184,7 +2497,45 @@ const PersoMgr = (function() {
       const newPct=isM?mv:eachAuto;
       if(barEl) barEl.style.width=Math.round(newPct*3)+'px';
       if(pctEl) pctEl.textContent=newPct.toFixed(1)+' %';
+      // Accumulation pour la ligne Total
+      const fd=getFund(fi.isin);
+      if(fd&&newPct>0){
+        ucAllocSum+=newPct;
+        srriW+=(fd.srri||4)*newPct;
+        ['ytd','a1','a3','a5','vol'].forEach(k=>{
+          if(fd[k]!=null){sums[k][0]+=newPct*fd[k];sums[k][1]+=newPct;}
+        });
+      }
     });
+
+    // ── Ligne Total : perfs pondérées FE + DOP + UC ──────────────────────────
+    const ucScale=ucPct/100;
+    const tot={};
+    ['ytd','a1','a3','a5'].forEach(k=>{
+      const ucAvg=sums[k][1]>0?sums[k][0]/sums[k][1]:null;
+      tot[k]=feAlloc/100*feP[k]+dopAlloc/100*dopP[k]+(ucAvg!=null?ucScale*ucAvg:0);
+      const el=document.getElementById('ptot-'+k+'-'+pid);
+      if(el) el.innerHTML=fmt(tot[k]);
+    });
+    const volAvg=sums.vol[1]>0?ucScale*(sums.vol[0]/sums.vol[1]):null;
+    const volEl=document.getElementById('ptot-vol-'+pid);
+    if(volEl) volEl.innerHTML=volAvg!=null?volAvg.toFixed(1).replace('.',',')+'&nbsp;%':'<span class="na">—</span>';
+    const allocTotal=feAlloc+dopAlloc+ucAllocSum;
+    const allocEl=document.getElementById('ptot-alloc-'+pid);
+    if(allocEl){
+      const cls=Math.abs(allocTotal-100)<0.5?'alloc-ok':(allocTotal>100?'alloc-bad':'alloc-warn');
+      const icon=Math.abs(allocTotal-100)<0.5?'✓':'⚠';
+      allocEl.innerHTML='<span class="'+cls+'" style="font-size:13px;font-weight:700">'+icon+' '+allocTotal.toFixed(1).replace('.',',')+'&nbsp;%</span>';
+    }
+    const srriEl=document.getElementById('ptot-srri-'+pid);
+    if(srriEl){
+      const base=feAlloc+dopAlloc+ucAllocSum;
+      srriEl.innerHTML=base>0?'<span title="SRRI moyen pondéré">'+(srriW/base).toFixed(1).replace('.',',')+'</span>':'—';
+    }
+    // Mémorise pour le simulateur
+    window._PERSO_BLENDED=window._PERSO_BLENDED||{};
+    window._PERSO_BLENDED[pid]={a1:tot.a1,a3:tot.a3};
+    if(typeof simSync==='function') simSync('P');
   }
 
   function setEncours(id, high) {
@@ -2251,10 +2602,102 @@ const PersoMgr = (function() {
     closeSelector(); save(); render();
   }
 
-  function init() { load(); render(); }
+  // ── Export / Import / Partage ────────────────────────────────────────────
+  function exportJson(id) {
+    const p = state.portfolios.find(x=>x.id===id); if (!p) return;
+    save();
+    const payload = {version:1, exported:new Date().toISOString().slice(0,10),
+      label:p.label, feAlloc:p.feAlloc, dopAlloc:p.dopAlloc, highEncours:p.highEncours, funds:p.funds};
+    const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'portefeuille-'+p.label.replace(/[^a-zA-Z0-9]+/g,'-').toLowerCase()+'.json';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 500);
+  }
+
+  function importJson() {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.json,application/json';
+    inp.onchange = () => {
+      const f = inp.files[0]; if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const d = JSON.parse(r.result);
+          if (!d || !Array.isArray(d.funds)) throw new Error('format');
+          const p = mkNew(d.label || 'Portefeuille importé');
+          p.feAlloc = parseInt(d.feAlloc)||30;
+          p.dopAlloc = parseInt(d.dopAlloc)||0;
+          p.highEncours = !!d.highEncours;
+          p.funds = d.funds.filter(fi=>fi && typeof fi.isin==='string')
+            .map(fi=>({isin:fi.isin, manualAlloc:fi.manualAlloc??null, enabled:fi.enabled!==false}));
+          state.portfolios.push(p); active = p.id;
+          save(); render();
+        } catch(e) { alert('Fichier invalide — export JSON attendu.'); }
+      };
+      r.readAsText(f);
+    };
+    inp.click();
+  }
+
+  function shareLink(id) {
+    const p = state.portfolios.find(x=>x.id===id); if (!p) return;
+    save();
+    const payload = {label:p.label, feAlloc:p.feAlloc, dopAlloc:p.dopAlloc, highEncours:p.highEncours, funds:p.funds};
+    const data = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    const url = location.origin + location.pathname + '#ptf=' + data;
+    const done = () => alert('Lien copié !\\nEnvoyez-le : le portefeuille s\\'ajoutera automatiquement à l\\'ouverture de la page.');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done, ()=>prompt('Copiez ce lien :', url));
+    } else { prompt('Copiez ce lien :', url); }
+  }
+
+  function checkHash() {
+    const m = location.hash.match(/#ptf=(.+)/);
+    if (!m) return false;
+    try {
+      const d = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+      if (!d || !Array.isArray(d.funds)) return false;
+      const p = mkNew((d.label || 'Portefeuille partagé') + ' (reçu)');
+      p.feAlloc = parseInt(d.feAlloc)||30;
+      p.dopAlloc = parseInt(d.dopAlloc)||0;
+      p.highEncours = !!d.highEncours;
+      p.funds = d.funds.filter(fi=>fi && typeof fi.isin==='string')
+        .map(fi=>({isin:fi.isin, manualAlloc:fi.manualAlloc??null, enabled:fi.enabled!==false}));
+      state.portfolios.push(p); active = p.id;
+      history.replaceState(null, '', location.pathname + location.search);
+      save();
+      return true;
+    } catch(e) { return false; }
+  }
+
+  // ── Impression / PDF ─────────────────────────────────────────────────────
+  function printPerso(id) {
+    const p = state.portfolios.find(x=>x.id===id); if (!p) return;
+    save();
+    const feAlloc = p.feAlloc||30, dopAlloc = p.dopAlloc||0;
+    const taux = _getFERate(100-feAlloc);
+    const rows = [];
+    rows.push({name:'Fonds en Euros', srri:1, ytd:null, a1:taux, a3:(Math.pow(1+taux/100,3)-1)*100, a5:(Math.pow(1+taux/100,5)-1)*100, alloc:feAlloc, note:'Taux 2025 : '+taux.toFixed(2).replace('.',',')+' %'});
+    if (dopAlloc>0) rows.push({name:'DOP (taux fixe 5,00 %/an)', srri:2, ytd:null, a1:5, a3:15, a5:25, alloc:dopAlloc});
+    p.funds.forEach(fi=>{
+      if (fi.enabled===false) return;
+      const fd = getFund(fi.isin); if (!fd) return;
+      const ik = isinKey(fi.isin);
+      const pctEl = document.getElementById('perso-pct-'+p.id+'-'+ik);
+      const alloc = pctEl ? parseFloat(pctEl.textContent.replace(',','.')) : null;
+      rows.push({name:fd.name, isin:fd.isin, srri:fd.srri, ytd:fd.ytd, a1:fd.a1, a3:fd.a3, a5:fd.a5, vol:fd.vol, alloc:isNaN(alloc)?null:alloc});
+    });
+    const tot = (window._PERSO_BLENDED||{})[p.id] || {};
+    openPrintDoc('Portefeuille « '+p.label+' »', rows, tot);
+  }
+
+  function init() { load(); checkHash(); render(); }
 
   return {init, switchTo, createNew, duplicate, deletePortfolio, rename,
-          openSelector, closeSelector, applySelector, updateAllocs, save, setEncours, filterSel};
+          openSelector, closeSelector, applySelector, updateAllocs, save, setEncours, filterSel,
+          exportJson, importJson, shareLink, printPerso};
 })();
 
 if (document.readyState === 'loading') {
