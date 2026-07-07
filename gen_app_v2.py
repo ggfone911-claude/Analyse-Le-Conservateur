@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import os
 import datetime
@@ -592,7 +593,6 @@ html_parts.append("""<div class="filter-results" id="filterResults">
         <th style="text-align:right" onclick="sortTable('tblFiltered',8)">1 An</th>
         <th style="text-align:right" onclick="sortTable('tblFiltered',9)">3 Ans</th>
         <th style="text-align:right" onclick="sortTable('tblFiltered',10)">5 Ans</th>
-        <th style="text-align:center">Boursorama</th>
       </tr></thead>
       <tbody id="filteredBody"></tbody>
     </table>
@@ -825,16 +825,14 @@ for i, cat in enumerate(CATEGORIES):
 <thead><tr>
   <th onclick="sortTable('tbl_{cid}',0)">#</th>
   <th onclick="sortTable('tbl_{cid}',1)">Fonds</th>
-  <th onclick="sortTable('tbl_{cid}',2)">Gérant</th>
-  <th onclick="sortTable('tbl_{cid}',3)" style="text-align:center">SRRI</th>
-  <th onclick="sortTable('tbl_{cid}',4)" style="text-align:right">VL</th>
-  <th onclick="sortTable('tbl_{{cid}}',5)" style="text-align:right" title="YTD au {_fmt_date_short(_VL_OVERRIDE_DATE)}">YTD</th>
-  <th onclick="sortTable('tbl_{{cid}}',6)" style="text-align:right" title="1 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 Mois</th>
-  <th onclick="sortTable('tbl_{{cid}}',7)" style="text-align:right" title="6 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">6 Mois</th>
-  <th onclick="sortTable('tbl_{{cid}}',8)" style="text-align:right" title="1 an — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 An</th>
-  <th onclick="sortTable('tbl_{{cid}}',9)" style="text-align:right" title="3 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">3 Ans</th>
-  <th onclick="sortTable('tbl_{{cid}}',10)" style="text-align:right" title="5 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">5 Ans</th>
-  <th style="text-align:center">Boursorama</th>
+  <th onclick="sortTable('tbl_{cid}',2)" style="text-align:center">SRRI</th>
+  <th onclick="sortTable('tbl_{cid}',3)" style="text-align:right">VL</th>
+  <th onclick="sortTable('tbl_{{cid}}',4)" style="text-align:right" title="YTD au {_fmt_date_short(_VL_OVERRIDE_DATE)}">YTD</th>
+  <th onclick="sortTable('tbl_{{cid}}',5)" style="text-align:right" title="1 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 Mois</th>
+  <th onclick="sortTable('tbl_{{cid}}',6)" style="text-align:right" title="6 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">6 Mois</th>
+  <th onclick="sortTable('tbl_{{cid}}',7)" style="text-align:right" title="1 an — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 An</th>
+  <th onclick="sortTable('tbl_{{cid}}',8)" style="text-align:right" title="3 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">3 Ans</th>
+  <th onclick="sortTable('tbl_{{cid}}',9)" style="text-align:right" title="5 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">5 Ans</th>
 </tr></thead>
 <tbody>
 ''')
@@ -847,7 +845,6 @@ for i, cat in enumerate(CATEGORIES):
         html_parts.append(f'''<tr class="{top3_cls}">
   <td data-val="{rank+1}">{medal(rank)}</td>
   <td class="fund-name" data-val="{f['name']}">{"<a href='" + bourso_url(bid) + "' target='_blank' class='fund-name-link'>" + f['name'] + "</a>" if bid else f["name"]}<br><span class="isin-cell">{f["isin"]}</span></td>
-  <td data-val="{f['mgr']}">{f["mgr"]}</td>
   <td style="text-align:center" data-val="{srri}"><span class="srri-badge srri-{srri}">{srri}</span></td>
   <td style="text-align:right" data-val="{f['vl'] or 0}">{fmt_vl(f["vl"])}</td>
   <td style="text-align:right" data-val="{f['ytd'] if f['ytd'] is not None else -9999}">{fmt(f["ytd"])}</td>
@@ -856,7 +853,6 @@ for i, cat in enumerate(CATEGORIES):
   <td style="text-align:right" data-val="{f['a1'] if f['a1'] is not None else -9999}">{fmt(f["a1"])}</td>
   <td style="text-align:right" data-val="{f['a3'] if f['a3'] is not None else -9999}">{fmt(f["a3"])}</td>
   <td style="text-align:right" data-val="{f['a5'] if f['a5'] is not None else -9999}">{fmt(f["a5"])}</td>
-  <td style="text-align:center">{bourso_cell}</td>
 </tr>
 ''')
     html_parts.append('</tbody></table></div>\n')
@@ -1512,11 +1508,10 @@ function applyFilters() {{
   const tbody = document.getElementById('filteredBody');
   tbody.innerHTML = results.map((f, i) => {{
     const bid = f.bid;
-    const bourso = bid ? `<a href="https://www.boursorama.com/bourse/opcvm/cours/${{bid}}/" target="_blank" class="bourso-link">Voir →</a>` : '<span class="na">—</span>';
     const sc = srriColor(f.srri);
     return `<tr>
       <td data-val="${'{i+1}'}">${'{i+1}'}</td>
-      <td class="fund-name" data-val="${'{f.name}'}">${'{f.name}'}<br><span class="isin-cell">${'{f.isin}'}</span></td>
+      <td class="fund-name" data-val="${'{f.name}'}">${{bid ? `<a href="https://www.boursorama.com/bourse/opcvm/cours/${{bid}}/" target="_blank" class="fund-name-link">${{f.name}}</a>` : f.name}}<br><span class="isin-cell">${'{f.isin}'}</span></td>
       <td data-val="${'{f.cat_label}'}" style="font-size:11px;color:#718096">${'{f.cat_label}'}</td>
       <td style="text-align:center" data-val="${'{f.srri}'}">${{`<span class="srri-badge" style="background:${{sc}}">${{f.srri}}</span>`}}</td>
       <td style="text-align:right" data-val="${'{f.vl || 0}'}">${{fmtVL(f.vl)}}</td>
@@ -1526,7 +1521,6 @@ function applyFilters() {{
       <td style="text-align:right" data-val="${'{f.a1 ?? -9999}'}">${{fmt(f.a1)}}</td>
       <td style="text-align:right" data-val="${'{f.a3 ?? -9999}'}">${{fmt(f.a3)}}</td>
       <td style="text-align:right" data-val="${'{f.a5 ?? -9999}'}">${{fmt(f.a5)}}</td>
-      <td style="text-align:center">${{bourso}}</td>
     </tr>`;
   }}).join('');
 }}
