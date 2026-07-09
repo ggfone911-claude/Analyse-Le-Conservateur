@@ -576,6 +576,11 @@ tr.top3 td:first-child{font-weight:700}
 .sim-table td,.sim-table th{padding:5px 10px}
 .sim-note{font-size:11px;color:#a0aec0;margin-top:8px;font-style:italic}
 @media print{.no-print{display:none!important}}
+.vision-bar{display:flex;gap:6px;align-items:center;margin-left:auto}
+#sec_portefeuilles.vis-a1 table th:nth-child(6),#sec_portefeuilles.vis-a1 table td:nth-child(6){background:#fff8e1}
+#sec_portefeuilles.vis-a3 table th:nth-child(7),#sec_portefeuilles.vis-a3 table td:nth-child(7){background:#fff8e1}
+#sec_portefeuilles.vis-a5 table th:nth-child(8),#sec_portefeuilles.vis-a5 table td:nth-child(8){background:#fff8e1}
+#sec_portefeuilles .sim-table th,#sec_portefeuilles .sim-table td{background:transparent!important}
 </style>
 </head>
 <body>
@@ -1026,7 +1031,7 @@ for _pdef in _PORTFOLIOS_DEF:
         **{k: _pdef[k] for k in ("id", "label", "emoji", "range", "color_cls", "desc", "note")},
         "kpis": [
             ("Perf. pondérée 1 An", "—", ""),
-            ("Perf. pondérée 3 Ans", "—", ""),
+            ("Perf. annualisée", "—", ""),
             ("Volatilité 1 An (pond.)", "—", ""),
             ("SRRI moyen pond.", f"{_srri_moy:.1f}".replace(".", ","), ""),
             ("Fonds sélectionnés", str(len(_funds)), ""),
@@ -1090,8 +1095,12 @@ for _ptf in _PORTFOLIOS_DATA:
     _ptf_js_dict[_ptf["id"]] = {"cc": _ptf["color_cls"], "label": _ptf["label"], "funds": _funds_arr}
 _PTF_DATA_JS = json.dumps(_ptf_js_dict, ensure_ascii=False)
 
-html_parts.append('<div class="section" id="sec_portefeuilles">\n')
-html_parts.append('<div class="cat-header"><h2>💼 Portefeuilles Optimisés</h2><span class="badge">3 profils de risque</span></div>\n')
+html_parts.append('<div class="section vis-a1" id="sec_portefeuilles">\n')
+html_parts.append('<div class="cat-header"><h2>💼 Portefeuilles Optimisés</h2><span class="badge">3 profils de risque</span>'
+                  '<div class="vision-bar"><span style="font-size:12px;font-weight:600;color:#4a5568">Vision&nbsp;:</span>'
+                  '<button class="period-btn active" id="visBtn-a1" onclick="setVision(\'a1\')">1 an</button>'
+                  '<button class="period-btn" id="visBtn-a3" onclick="setVision(\'a3\')">3 ans (N−3)</button>'
+                  '<button class="period-btn" id="visBtn-a5" onclick="setVision(\'a5\')">5 ans (N−5)</button></div></div>\n')
 html_parts.append(f'<div class="source-note">📅 Construit sur la base des performances Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)} — Sélection et pondération optimisée de 15 fonds par profil SRRI · Perfs mises à jour automatiquement</div>\n')
 
 # ── Fonds en Euros controls ────────────────────────────────────────────────
@@ -1149,10 +1158,11 @@ for pi, ptf in enumerate(_PORTFOLIOS_DATA):
     html_parts.append(f'  <div class="ptf-title ptf-t-{cc}">{ptf["emoji"]} Portefeuille {ptf["label"]}</div>\n')
     html_parts.append(f'  <div class="ptf-sub ptf-s-{cc}">{ptf["desc"]}</div>\n')
     html_parts.append('  <div class="ptf-kpis">\n')
-    _kpi_ids = {0: "a1", 1: "a3", 2: "vol"}
+    _kpi_ids = {0: "main", 1: "ann", 2: "vol"}
     for ki, (lbl, val, cls) in enumerate(ptf["kpis"]):
         kid_attr = f' id="kpi-{_kpi_ids[ki]}-{ptf["id"]}"' if ki in _kpi_ids else ''
-        html_parts.append(f'    <div class="ptf-kpi"><div class="ptf-kpi-lbl">{lbl}</div><div class="ptf-kpi-val {cls}"{kid_attr}>{val}</div></div>\n')
+        klbl_attr = f' id="kpilbl-{_kpi_ids[ki]}-{ptf["id"]}"' if ki in (0, 1) else ''
+        html_parts.append(f'    <div class="ptf-kpi"><div class="ptf-kpi-lbl"{klbl_attr}>{lbl}</div><div class="ptf-kpi-val {cls}"{kid_attr}>{val}</div></div>\n')
     html_parts.append(f'  <div style="margin-top:10px"><button class="perso-action-btn" onclick="printPortfolio(\'{ptf["id"]}\')">🖨️ Imprimer / PDF</button></div>\n')
     html_parts.append('  </div>\n</div>\n')
 
@@ -2026,35 +2036,53 @@ function updateFE() {{
     }});
 
     // ── KPI blended : FE + DOP + UC (pondéré par allocations réelles)
-    let sumW_a1 = 0, sumW_a3 = 0, sumW_vol = 0, totW = 0, totW3 = 0, totWv = 0;
+    const sums = {{ a1: [0,0], a3: [0,0], a5: [0,0], vol: [0,0] }};
     pd.funds.forEach((f, i) => {{
       const rank = i + 1;
       const chk  = document.getElementById('chk-' + pd.cc + '-' + rank);
       if (!chk || !chk.checked) return;
       const w = actualAllocs[rank] || 0;
-      if (f.a1 != null && w > 0) {{ sumW_a1 += w * f.a1; totW  += w; }}
-      if (f.a3 != null && w > 0) {{ sumW_a3 += w * f.a3; totW3 += w; }}
-      if (f.vol != null && w > 0) {{ sumW_vol += w * f.vol; totWv += w; }}
+      if (w <= 0) return;
+      ['a1','a3','a5','vol'].forEach(k => {{
+        if (f[k] != null) {{ sums[k][0] += w * f[k]; sums[k][1] += w; }}
+      }});
     }});
-    if (totW  === 0) totW  = 100;
-    if (totW3 === 0) totW3 = 100;
-    const blend_a1 = feAlloc / 100 * fePerfs.a1 + dopAlloc / 100 * dopPerfs.a1 + ucScale * (sumW_a1 / totW);
-    const blend_a3 = feAlloc / 100 * fePerfs.a3 + dopAlloc / 100 * dopPerfs.a3 + ucScale * (sumW_a3 / totW3);
+    // Renormalisation : les fonds sans historique sur l'horizon sont exclus du calcul
+    const blends = {{}};
+    ['a1','a3','a5'].forEach(k => {{
+      const ucAvg = sums[k][1] > 0 ? sums[k][0] / sums[k][1] : null;
+      blends[k] = ucAvg != null
+        ? feAlloc / 100 * fePerfs[k] + dopAlloc / 100 * dopPerfs[k] + ucScale * ucAvg
+        : null;
+    }});
     // Volatilité pondérée : FE et DOP ≈ 0 → contribution UC uniquement (approx. hors corrélations)
-    const blend_vol = totWv > 0 ? ucScale * (sumW_vol / totWv) : null;
+    const blend_vol = sums.vol[1] > 0 ? ucScale * (sums.vol[0] / sums.vol[1]) : null;
 
-    const k1 = document.getElementById('kpi-a1-' + pid);
-    const k3 = document.getElementById('kpi-a3-' + pid);
+    // ── Vision 1 an / 3 ans / 5 ans ──────────────────────────────────────────
+    const vis      = window._PTF_VISION || 'a1';
+    const visYears = vis === 'a3' ? 3 : (vis === 'a5' ? 5 : 1);
+    const visLbl   = vis === 'a3' ? '3 Ans' : (vis === 'a5' ? '5 Ans' : '1 An');
+    const main = blends[vis];
+    const ann  = main != null ? (Math.pow(1 + main / 100, 1 / visYears) - 1) * 100 : null;
+
+    const lm = document.getElementById('kpilbl-main-' + pid);
+    const la = document.getElementById('kpilbl-ann-' + pid);
+    if (lm) lm.textContent = 'Perf. pondérée ' + visLbl + (visYears > 1 ? ' (cumulée)' : '');
+    if (la) la.textContent = 'Annualisée (' + visLbl.toLowerCase() + ')';
+    const km = document.getElementById('kpi-main-' + pid);
+    const ka = document.getElementById('kpi-ann-' + pid);
     const kv = document.getElementById('kpi-vol-' + pid);
-    if (k1) k1.innerHTML = fmtKpi(blend_a1);
-    if (k3) k3.innerHTML = fmtKpi(blend_a3);
+    if (km) km.innerHTML = main != null ? fmtKpi(main) : '<span class="na">—</span>';
+    if (ka) ka.innerHTML = ann != null
+      ? '<span class="' + (ann >= 0 ? 'pos' : 'neg') + '">' + (ann >= 0 ? '+' : '') + ann.toFixed(1).replace('.', ',') + '&nbsp;%/an</span>'
+      : '<span class="na">—</span>';
     if (kv) kv.innerHTML = blend_vol != null
       ? blend_vol.toFixed(1).replace('.', ',') + '&nbsp;%'
       : '<span class="na">—</span>';
 
-    // Mémorise le rendement 1 an pondéré pour le simulateur
+    // Mémorise les rendements pondérés pour le simulateur
     window._PTF_BLENDED = window._PTF_BLENDED || {{}};
-    window._PTF_BLENDED[pid] = {{ a1: blend_a1, a3: blend_a3 }};
+    window._PTF_BLENDED[pid] = {{ a1: blends.a1, a3: blends.a3, a5: blends.a5 }};
   }});
   if (typeof simSync === 'function') simSync('T');
 }}
@@ -2133,6 +2161,18 @@ function printPortfolio(pid) {
   openPrintDoc('Portefeuille type « '+pd.label+' »', rows, tot);
 }
 
+/* ── Vision 1 an / 3 ans / 5 ans ─────────────────────────────────── */
+function setVision(vis) {
+  window._PTF_VISION = vis;
+  ['a1','a3','a5'].forEach(v => {
+    const b = document.getElementById('visBtn-'+v);
+    if (b) b.classList.toggle('active', v === vis);
+  });
+  const sec = document.getElementById('sec_portefeuilles');
+  if (sec) { sec.classList.remove('vis-a1','vis-a3','vis-a5'); sec.classList.add('vis-'+vis); }
+  if (typeof updateFE === 'function') updateFE();
+}
+
 /* ── Simulateur ─────────────────────────────────────────────────── */
 function _activeBlended(prefix) {
   if (prefix === 'T') {
@@ -2177,23 +2217,31 @@ function simCompute(prefix) {
   g('table').innerHTML = rows + '</tbody>';
 }
 
+function _visionRate(b) {
+  // Rendement annualisé selon la vision active, avec repli sur 1 an
+  const vis = window._PTF_VISION || 'a1';
+  const years = vis === 'a3' ? 3 : (vis === 'a5' ? 5 : 1);
+  let v = b ? b[vis] : null, y = years, lbl = vis === 'a3' ? '3 ans' : (vis === 'a5' ? '5 ans' : '1 an');
+  if (v == null && b && b.a1 != null) { v = b.a1; y = 1; lbl = '1 an'; }
+  if (v == null) return null;
+  return { rate: (Math.pow(1 + v/100, 1/y) - 1) * 100, lbl: lbl };
+}
+
 function simUseActive(prefix) {
-  const b = _activeBlended(prefix);
-  if (!b || b.a1 == null) { alert('Aucun portefeuille actif ou données insuffisantes.'); return; }
-  const a3ann = b.a3 != null ? (Math.pow(1+b.a3/100, 1/3)-1)*100 : null;
-  const rate = a3ann != null ? a3ann : b.a1;
-  document.getElementById('sim'+prefix+'-rate').value = rate.toFixed(1);
+  const r = _visionRate(_activeBlended(prefix));
+  if (!r) { alert('Aucun portefeuille actif ou données insuffisantes.'); return; }
+  document.getElementById('sim'+prefix+'-rate').value = r.rate.toFixed(1);
   simCompute(prefix);
 }
 
 function simSync(prefix) {
   const b = _activeBlended(prefix);
   const hint = document.getElementById('sim'+prefix+'-hint');
-  if (hint && b && b.a1 != null) {
-    const a3ann = b.a3 != null ? (Math.pow(1+b.a3/100, 1/3)-1)*100 : null;
-    hint.textContent = 'Portefeuille affiché : '+(b.a1>=0?'+':'')+b.a1.toFixed(1).replace('.',',')+' % sur 1 an'
-      + (a3ann != null ? ' · '+(a3ann>=0?'+':'')+a3ann.toFixed(1).replace('.',',')+' %/an (3 ans annualisé)' : '')
-      + ' — bouton « Utiliser le portefeuille affiché » pour reprendre ce taux.';
+  const r = _visionRate(b);
+  if (hint && r) {
+    hint.textContent = 'Portefeuille affiché — vision '+r.lbl+' : '
+      +(r.rate>=0?'+':'')+r.rate.toFixed(1).replace('.',',')+' %/an annualisé'
+      +' — bouton « Utiliser le portefeuille affiché » pour reprendre ce taux.';
   }
   simCompute(prefix);
 }
@@ -2534,7 +2582,7 @@ const PersoMgr = (function() {
     }
     // Mémorise pour le simulateur
     window._PERSO_BLENDED=window._PERSO_BLENDED||{};
-    window._PERSO_BLENDED[pid]={a1:tot.a1,a3:tot.a3};
+    window._PERSO_BLENDED[pid]={a1:tot.a1,a3:tot.a3,a5:tot.a5};
     if(typeof simSync==='function') simSync('P');
   }
 
