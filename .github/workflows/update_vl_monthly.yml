@@ -22,9 +22,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Scraping historique mensuel Boursorama
+      # PAS de continue-on-error : le script conserve deja les donnees
+      # existantes fonds par fonds, mais un echec global doit se voir.
+      - name: Scraping historique mensuel Boursorama (5 ans)
         run: python scraper_monthly.py
-        continue-on-error: true
 
       - name: Verification du fichier genere
         run: |

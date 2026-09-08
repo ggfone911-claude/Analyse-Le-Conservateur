@@ -15,11 +15,36 @@ if os.path.exists(_vl_path):
             _raw_overrides = json.load(_f)
         for _isin, _data in _raw_overrides.items():
             _VL_OVERRIDES[_isin] = _data
-            if _VL_OVERRIDE_DATE is None and "date" in _data:
-                _VL_OVERRIDE_DATE = _data["date"]
+            _d = _data.get("date")
+            if _d and (_VL_OVERRIDE_DATE is None or _d > _VL_OVERRIDE_DATE):
+                _VL_OVERRIDE_DATE = _d
         print(f"📡 vl_overrides.json chargé — {len(_VL_OVERRIDES)} fonds (date: {_VL_OVERRIDE_DATE})")
     except Exception as _e:
         print(f"⚠️  Impossible de lire vl_overrides.json : {_e}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Performances Boursorama — chargées depuis bourso_perf.json (scrapé quotidiennement)
+# Format : { "last_updated": "...", "data": { ISIN: {"bid","vl","date",
+#            "eom": {ytd,m1,m6,a1,a3,a5,a10}, "gli": {...}} } }
+# Les deux conventions sont conservées : « à la fin de mois » et « glissantes ».
+# ─────────────────────────────────────────────────────────────────────────────
+_BP_DATA: dict = {}
+_BP_LAST_UPDATED: str | None = None
+_bp_path = os.path.join(os.path.dirname(__file__), "bourso_perf.json")
+if os.path.exists(_bp_path):
+    try:
+        with open(_bp_path, encoding="utf-8") as _f:
+            _bp_raw = json.load(_f)
+        if isinstance(_bp_raw, dict) and "data" in _bp_raw:
+            _BP_DATA = _bp_raw["data"]
+            _BP_LAST_UPDATED = _bp_raw.get("last_updated")
+            print(f"\U0001F4C8 bourso_perf.json chargé — {len(_BP_DATA)} fonds (màj: {_BP_LAST_UPDATED})")
+        else:
+            print("\u26A0\uFE0F  bourso_perf.json au format ancien (liste plate) — ignoré")
+    except Exception as _e:
+        print(f"\u26A0\uFE0F  Impossible de lire bourso_perf.json : {_e}")
+else:
+    print("\u26A0\uFE0F  bourso_perf.json absent — repli sur les performances figées dans le code")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Historical monthly VL — chargé depuis historical_monthly.json si disponible
@@ -322,17 +347,30 @@ def _risk_metrics(isin):
 # Merge Boursorama data into each fund
 for cat in CATEGORIES:
     for f in cat["funds"]:
-        b = BOURSO_DATA.get(f["isin"])
-        if b:
-            f["m1"]  = b["m1"]
-            f["m6"]  = b["m6"]
-            f["a1"]  = b["a1"]
-            f["a3"]  = b["a3"]
-            f["a5"]  = b["a5"]
-            f["bid"] = b["bid"]
+        b  = BOURSO_DATA.get(f["isin"])
+        bp = _BP_DATA.get(f["isin"])
+        f["bid"] = (bp or {}).get("bid") or (b or {}).get("bid")
+        _KEYS = ("ytd", "m1", "m6", "a1", "a3", "a5")
+        if bp:
+            # Source vivante : les deux conventions Boursorama
+            f["perf_eom"] = {k: bp.get("eom", {}).get(k) for k in _KEYS}
+            f["perf_gli"] = {k: bp.get("gli", {}).get(k) for k in _KEYS}
+            if bp.get("date"):
+                f["vl_date"] = bp["date"]
+        elif b:
+            # Repli : valeurs figées dans le code (une seule convention connue)
+            _fallback = {"ytd": b.get("ytd_b"), "m1": b["m1"], "m6": b["m6"],
+                         "a1": b["a1"], "a3": b["a3"], "a5": b["a5"]}
+            f["perf_eom"] = dict(_fallback)
+            f["perf_gli"] = dict(_fallback)
         else:
-            f["m1"] = f["m6"] = f["a1"] = f["a3"] = f["a5"] = None
-            f["bid"] = None
+            f["perf_eom"] = {k: None for k in _KEYS}
+            f["perf_gli"] = {k: None for k in _KEYS}
+        # Jeu actif rendu côté serveur (bascule côté client ensuite)
+        for _k in ("m1", "m6", "a1", "a3", "a5"):
+            f[_k] = f["perf_eom"][_k]
+        if f["perf_eom"].get("ytd") is not None:
+            f["ytd"] = f["perf_eom"]["ytd"]
         # Écrase VL (et éventuellement YTD) avec les données scrapées en live
         ov = _VL_OVERRIDES.get(f["isin"])
         if ov:
@@ -355,6 +393,22 @@ def fmt_vl(v):
     if v is None: return "—"
     if v >= 1000: return f"{v:,.2f} €".replace(",", " ")
     return f"{v:.2f} €"
+
+def perf_td(f, key):
+    """Cellule de performance portant les deux conventions Boursorama.
+    data-e = à la fin de mois, data-g = glissantes ; le jeu affiché est
+    reconstruit côté client par setPerfMode()."""
+    e = (f.get("perf_eom") or {}).get(key)
+    g = (f.get("perf_gli") or {}).get(key)
+    if key == "ytd" and e is None:
+        e = f.get("ytd")
+    if key == "ytd" and g is None:
+        g = f.get("ytd")
+    av = e if e is not None else -9999
+    de = "" if e is None else f"{e}"
+    dg = "" if g is None else f"{g}"
+    return (f'<td class="perf-cell" style="text-align:right" data-k="{key}" '
+            f'data-e="{de}" data-g="{dg}" data-val="{av}">{fmt(e)}</td>')
 
 def medal(rank):
     m = ["🥇","🥈","🥉"]
@@ -379,7 +433,7 @@ html_parts.append("""<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Le Conservateur – Analyse des Fonds {_fmt_date_short(datetime.date.today().isoformat())}</title>
+<title>Le Conservateur - Analyse des Fonds</title>
 <!-- Chart.js embarqué — fichier autonome, pas de CDN -->
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -458,6 +512,10 @@ tr.top3 td:first-child{font-weight:700}
 .period-btn{padding:4px 12px;border:1px solid #e2e8f0;border-radius:20px;background:#f7fafc;color:#4a5568;font-size:12px;font-weight:500;cursor:pointer;transition:all .15s;outline:none}
 .period-btn:hover{border-color:#3266ad;color:#3266ad;background:#eef3fb}
 .period-btn.active{background:#3266ad;border-color:#3266ad;color:#fff;font-weight:600}
+.perfmode-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:10px 24px 0}
+.perfmode-label{font-size:12px;font-weight:600;color:#4a5568}
+.perfmode-help{font-size:11px;color:#a0aec0;flex:1 1 220px;min-width:0}
+@media(max-width:768px){.perfmode-bar{padding:10px 16px 0}}
 @media(max-width:768px){.section{padding:16px}.tabs{padding:0 16px}.stats-bar{padding:12px 16px}}
 .ptf-tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
 .ptf-tab{padding:8px 18px;border-radius:20px;border:1px solid #e2e8f0;background:#f7fafc;font-size:13px;font-weight:500;cursor:pointer;color:#4a5568;transition:all .15s}
@@ -651,6 +709,15 @@ html_parts.append("""<div class="filter-results" id="filterResults">
 </div>
 """)
 
+# ── Bascule de convention de performance ─────────────────────────────────────
+html_parts.append(f'''<div class="perfmode-bar">
+  <span class="perfmode-label">Performances&nbsp;:</span>
+  <button class="period-btn active" data-pmode="eom" onclick="setPerfMode('eom')">À la fin de mois</button>
+  <button class="period-btn" data-pmode="gli" onclick="setPerfMode('gli')">Glissantes</button>
+  <span class="perfmode-help" id="perfmodeHelp">Arrêtées à la dernière VL du mois précédent — stables d'un jour à l'autre.</span>
+</div>
+''')
+
 # ── Onglets ──────────────────────────────────────────────────────────────────
 html_parts.append('<div class="tabs" id="mainTabs">\n')
 
@@ -680,18 +747,19 @@ for i, cat in enumerate(CATEGORIES):
     }
     use_hist = len(hist_in_cat) >= 2  # Minimum 2 fonds avec données historiques
     if use_hist:
-        # Sélectionner les 12 derniers mois communs
+        # Axe complet de la catégorie (jusqu'à 60 mois) — le découpage par
+        # période et le rebasage sont faits côté client sur la fenêtre affichée.
         all_hist_dates = sorted({
             pt["date"]
             for months in hist_in_cat.values()
             for pt in months
-        })[-12:]
+        })[-61:]
     else:
         all_hist_dates = []
 
     html_parts.append(f'<div class="section {active}" id="sec_{cid}">\n')
     html_parts.append(f'<div class="cat-header"><h2>{cat["label"]}</h2><span class="badge">{len(cat["funds"])} fonds</span></div>\n')
-    html_parts.append(f'<div class="source-note">📅 Performances historiques issues de Boursorama — calcul au {_fmt_date_short(_HIST_LAST_UPDATED)} · YTD (depuis le 1er janv.) issu de Boursorama au {_fmt_date_short(_VL_OVERRIDE_DATE)}</div>\n')
+    html_parts.append(f'<div class="source-note">📅 VL et performances relevées sur Boursorama le {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)} (VL la plus récente : {_fmt_date_short(_VL_OVERRIDE_DATE)}) · historique mensuel des VL au {_fmt_date_short(_HIST_LAST_UPDATED)}</div>\n')
 
     # Top 5 cards
     html_parts.append('<div class="top5">\n')
@@ -715,7 +783,7 @@ for i, cat in enumerate(CATEGORIES):
     # Chart 1 : barres (période sélectionnable)
     html_parts.append(f'''<div class="chart-wrap">
 <h3 id="bartitle_{cid}">Performance YTD</h3>
-<div class="chart-sub">YTD au {_fmt_date_short(_VL_OVERRIDE_DATE)} · Historique Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)}</div>
+<div class="chart-sub">Relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)} · convention sélectionnée ci-dessus</div>
 <div class="period-btns">
   <button class="period-btn active" data-cat="{cid}" data-bperiod="YTD" onclick="filterBarPeriod('{cid}','YTD')">YTD</button>
   <button class="period-btn" data-cat="{cid}" data-bperiod="1M" onclick="filterBarPeriod('{cid}','1M')">1 Mois</button>
@@ -728,33 +796,24 @@ for i, cat in enumerate(CATEGORIES):
 </div>
 ''')
 
-    # Chart 2 : courbe multi-périodes
-    if use_hist:
-        _line_subtitle = f"VL réelle Boursorama — {all_hist_dates[0] if all_hist_dates else '?'} → {all_hist_dates[-1] if all_hist_dates else '?'} · % de variation / 1er mois"
-        _line_buttons = f'''<div class="period-btns">
-  <button class="period-btn active" data-cat="{cid}" data-period="12M" onclick="filterLinePeriod('{cid}','12M')">12 Mois</button>
-  <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
+    # Chart 2 : évolution de la VL sur l'historique réel
+    _line_span = f"{all_hist_dates[0]} → {all_hist_dates[-1]}" if all_hist_dates else "—"
+    _line_subtitle = (f"VL mensuelle Boursorama · {_line_span} — chaque courbe est rebasée à 0 %"
+                      " à la première date de la période affichée")
+    _line_buttons = f'''<div class="period-btns">
   <button class="period-btn" data-cat="{cid}" data-period="3M" onclick="filterLinePeriod('{cid}','3M')">3 Mois</button>
+  <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
+  <button class="period-btn active" data-cat="{cid}" data-period="1A" onclick="filterLinePeriod('{cid}','1A')">1 An</button>
   <button class="period-btn" data-cat="{cid}" data-period="3A" onclick="filterLinePeriod('{cid}','3A')">3 Ans</button>
   <button class="period-btn" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
 </div>'''
-        _line_title = "Évolution VL — données réelles Boursorama"
-    else:
-        _line_subtitle = f"Données Boursorama au {_fmt_date_short(_HIST_LAST_UPDATED)} — axe Y : % cumulé réel"
-        _line_buttons = f'''<div class="period-btns">
-  <button class="period-btn active" data-cat="{cid}" data-period="5A" onclick="filterLinePeriod('{cid}','5A')">5 Ans</button>
-  <button class="period-btn" data-cat="{cid}" data-period="3A" onclick="filterLinePeriod('{cid}','3A')">3 Ans</button>
-  <button class="period-btn" data-cat="{cid}" data-period="1A" onclick="filterLinePeriod('{cid}','1A')">1 An</button>
-  <button class="period-btn" data-cat="{cid}" data-period="6M" onclick="filterLinePeriod('{cid}','6M')">6 Mois</button>
-  <button class="period-btn" data-cat="{cid}" data-period="1M" onclick="filterLinePeriod('{cid}','1M')">1 Mois</button>
-  <button class="period-btn" data-cat="{cid}" data-period="YTD" onclick="filterLinePeriod('{cid}','YTD')">YTD</button>
-</div>'''
-        _line_title = "Performances cumulées multi-horizons"
+    _line_title = "Évolution de la valeur liquidative"
     html_parts.append(f'''<div class="chart-wrap">
 <h3>{_line_title}</h3>
 <div class="chart-sub">{_line_subtitle}</div>
 {_line_buttons}
 <canvas id="line_{cid}" height="{height_bar}"></canvas>
+<div class="chart-sub" id="linenote_{cid}" style="margin-top:10px;margin-bottom:0"></div>
 </div>
 ''')
 
@@ -764,111 +823,68 @@ for i, cat in enumerate(CATEGORIES):
     # Bar chart — toutes périodes stockées, on switche dynamiquement
     bar_labels = [f["name"][:28] for f in funds_sorted]
 
-    def bar_period(key):
-        vals = [f.get(key) for f in funds_sorted]
+    def bar_period(key, mode):
+        src = "perf_eom" if mode == "eom" else "perf_gli"
+        vals = []
+        for f in funds_sorted:
+            v = (f.get(src) or {}).get(key)
+            if key == "ytd" and v is None:
+                v = f.get("ytd")
+            vals.append(v)
         cols = [color if (v is not None and v >= 0) else "#e53e3e" for v in vals]
         return {"data": vals, "colors": cols}
+
+    def bar_set(mode):
+        return {
+            "YTD": bar_period("ytd", mode),
+            "1M":  bar_period("m1",  mode),
+            "6M":  bar_period("m6",  mode),
+            "1A":  bar_period("a1",  mode),
+            "3A":  bar_period("a3",  mode),
+            "5A":  bar_period("a5",  mode),
+        }
 
     all_bar_charts.append({
         "id": f"bar_{cid}",
         "labels": bar_labels,
         "color": color,
-        "periods": {
-            "YTD": bar_period("ytd"),
-            "1M":  bar_period("m1"),
-            "6M":  bar_period("m6"),
-            "1A":  bar_period("a1"),
-            "3A":  bar_period("a3"),
-            "5A":  bar_period("a5"),
-        }
+        "periods": bar_set("eom"),
+        "periodsByMode": {"eom": bar_set("eom"), "gli": bar_set("gli")},
     })
 
-    # Line chart — historique mensuel si disponible, sinon performances cumulées
-    if use_hist and all_hist_dates:
-        # ── Mode historique : VL réelle normalisée en % de variation ────────
-        line_datasets = []
-        n_dates = len(all_hist_dates)
-        line_labels = [
-            f"{_HIST_MONTHS[int(d.split('-')[1])]} {d.split('-')[0][-2:]}"
-            for d in all_hist_dates
-        ]
-        line_weights = [i / (n_dates - 1) if n_dates > 1 else 0.0 for i in range(n_dates)]
-        for fi, f in enumerate(funds_sorted):
-            isin = f["isin"]
-            if isin not in hist_in_cat:
-                continue
-            monthly_dict = {pt["date"]: pt["vl"] for pt in hist_in_cat[isin]}
-            pts = [monthly_dict.get(d) for d in all_hist_dates]
-            non_null = [p for p in pts if p is not None]
-            if len(non_null) < 2:
-                continue
-            base = non_null[0]
-            if not base or base == 0:
-                continue
-            pts_pct = [round((p / base - 1) * 100, 3) if p is not None else None for p in pts]
-            lc = LINE_PALETTE[fi % len(LINE_PALETTE)]
-            line_datasets.append({
-                "label": f["name"][:35],
-                "data": pts_pct,
-                "fullData": pts_pct,
-                "borderColor": lc,
-                "borderWidth": 2,
-                "pointRadius": 3,
-            })
-        # Perf datasets (3A/5A fallback) pour le mode historique
-        _perf_ds_hist = []
-        for fi, f in enumerate(funds_sorted):
-            pts = [f.get("a5"), f.get("a3"), f.get("a1"), f.get("m6"), f.get("m1"), f.get("ytd")]
-            if sum(1 for p in pts if p is not None) < 2:
-                continue
-            _perf_ds_hist.append({
-                "label": f["name"][:35],
-                "data": pts, "fullData": pts,
-                "borderColor": LINE_PALETTE[fi % len(LINE_PALETTE)],
-                "borderWidth": 2, "pointRadius": 4,
-            })
-        all_line_charts.append({
-            "id": f"line_{cid}",
-            "mode": "historical",
-            "labels": line_labels,
-            "weights": line_weights,
-            "datasets": line_datasets,
-            "perfLabels": ['5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD'],
-            "perfWeights": [0.000, 0.400, 0.750, 0.900, 0.967, 1.000],
-            "perfDatasets": _perf_ds_hist,
+    # Line chart — VL mensuelle brute ; le découpage par période et le rebasage
+    # sont faits côté client, sur la fenêtre réellement affichée. Aucune série
+    # multi-horizons n'est tracée sur un axe temporel : ce serait une fausse
+    # chronologie (chaque horizon est une fenêtre de recul, pas un instant).
+    line_datasets = []
+    line_labels = [
+        f"{_HIST_MONTHS[int(d.split('-')[1])]} {d.split('-')[0][-2:]}"
+        for d in all_hist_dates
+    ]
+    for fi, f in enumerate(funds_sorted):
+        isin = f["isin"]
+        if isin not in hist_in_cat:
+            continue
+        monthly_dict = {pt["date"]: pt["vl"] for pt in hist_in_cat[isin]}
+        pts = [monthly_dict.get(d) for d in all_hist_dates]
+        if sum(1 for p in pts if p is not None) < 2:
+            continue
+        line_datasets.append({
+            "label": f["name"][:35],
+            "vl": pts,                      # VL brute alignée sur l'axe commun
+            "data": pts,
+            "fullData": pts,
+            "borderColor": LINE_PALETTE[fi % len(LINE_PALETTE)],
+            "borderWidth": 2,
+            "pointRadius": 2,
         })
-    else:
-        # ── Mode performance : % cumulés bruts multi-horizons ────────────────
-        _PERF_LABELS  = ['5 Ans','3 Ans','1 An','6 Mois','1 Mois','YTD']
-        _PERF_WEIGHTS = [0.000, 0.400, 0.750, 0.900, 0.967, 1.000]
-        line_datasets = []
-        for fi, f in enumerate(funds_sorted):
-            pts = [
-                f.get("a5"),   # 5 Ans
-                f.get("a3"),   # 3 Ans
-                f.get("a1"),   # 1 An
-                f.get("m6"),   # 6 Mois
-                f.get("m1"),   # 1 Mois
-                f.get("ytd"),  # YTD
-            ]
-            if sum(1 for p in pts if p is not None) < 2:
-                continue
-            lc = LINE_PALETTE[fi % len(LINE_PALETTE)]
-            line_datasets.append({
-                "label": f["name"][:35],
-                "data": pts,
-                "fullData": pts,
-                "borderColor": lc,
-                "borderWidth": 2,
-                "pointRadius": 4,
-            })
-        all_line_charts.append({
-            "id": f"line_{cid}",
-            "mode": "performance",
-            "labels": _PERF_LABELS,
-            "weights": _PERF_WEIGHTS,
-            "datasets": line_datasets,
-        })
+    all_line_charts.append({
+        "id": f"line_{cid}",
+        "mode": "vl",
+        "labels": line_labels,
+        "dates": all_hist_dates,
+        "datasets": line_datasets,
+    })
 
     # ── Table ──────────────────────────────────────────────────────────────────
     html_parts.append(f'''<div class="table-wrap">
@@ -878,12 +894,12 @@ for i, cat in enumerate(CATEGORIES):
   <th onclick="sortTable('tbl_{cid}',1)">Fonds</th>
   <th onclick="sortTable('tbl_{cid}',2)" style="text-align:center">SRRI</th>
   <th onclick="sortTable('tbl_{cid}',3)" style="text-align:right">VL</th>
-  <th onclick="sortTable('tbl_{{cid}}',4)" style="text-align:right" title="YTD au {_fmt_date_short(_VL_OVERRIDE_DATE)}">YTD</th>
-  <th onclick="sortTable('tbl_{{cid}}',5)" style="text-align:right" title="1 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 Mois</th>
-  <th onclick="sortTable('tbl_{{cid}}',6)" style="text-align:right" title="6 mois — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">6 Mois</th>
-  <th onclick="sortTable('tbl_{{cid}}',7)" style="text-align:right" title="1 an — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">1 An</th>
-  <th onclick="sortTable('tbl_{{cid}}',8)" style="text-align:right" title="3 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">3 Ans</th>
-  <th onclick="sortTable('tbl_{{cid}}',9)" style="text-align:right" title="5 ans — au {_fmt_date_short(_VL_OVERRIDE_DATE)}">5 Ans</th>
+  <th onclick="sortTable('tbl_{cid}',4)" style="text-align:right" title="Depuis le 1er janvier — relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)}">YTD</th>
+  <th onclick="sortTable('tbl_{cid}',5)" style="text-align:right" title="1 mois — relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)}">1 Mois</th>
+  <th onclick="sortTable('tbl_{cid}',6)" style="text-align:right" title="6 mois — relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)}">6 Mois</th>
+  <th onclick="sortTable('tbl_{cid}',7)" style="text-align:right" title="1 an — relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)}">1 An</th>
+  <th onclick="sortTable('tbl_{cid}',8)" style="text-align:right" title="3 ans — relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)}">3 Ans</th>
+  <th onclick="sortTable('tbl_{cid}',9)" style="text-align:right" title="5 ans — relevé Boursorama du {_fmt_date_short(_BP_LAST_UPDATED or _VL_OVERRIDE_DATE)}">5 Ans</th>
 </tr></thead>
 <tbody>
 ''')
@@ -898,12 +914,12 @@ for i, cat in enumerate(CATEGORIES):
   <td class="fund-name" data-val="{f['name']}">{"<a href='" + bourso_url(bid) + "' target='_blank' class='fund-name-link'>" + f['name'] + "</a>" if bid else f["name"]}<br><span class="isin-cell">{f["isin"]}</span></td>
   <td style="text-align:center" data-val="{srri}"><span class="srri-badge srri-{srri}">{srri}</span></td>
   <td style="text-align:right" data-val="{f['vl'] or 0}">{fmt_vl(f["vl"])}</td>
-  <td style="text-align:right" data-val="{f['ytd'] if f['ytd'] is not None else -9999}">{fmt(f["ytd"])}</td>
-  <td style="text-align:right" data-val="{f['m1'] if f['m1'] is not None else -9999}">{fmt(f["m1"])}</td>
-  <td style="text-align:right" data-val="{f['m6'] if f['m6'] is not None else -9999}">{fmt(f["m6"])}</td>
-  <td style="text-align:right" data-val="{f['a1'] if f['a1'] is not None else -9999}">{fmt(f["a1"])}</td>
-  <td style="text-align:right" data-val="{f['a3'] if f['a3'] is not None else -9999}">{fmt(f["a3"])}</td>
-  <td style="text-align:right" data-val="{f['a5'] if f['a5'] is not None else -9999}">{fmt(f["a5"])}</td>
+  {perf_td(f, "ytd")}
+  {perf_td(f, "m1")}
+  {perf_td(f, "m6")}
+  {perf_td(f, "a1")}
+  {perf_td(f, "a3")}
+  {perf_td(f, "a5")}
 </tr>
 ''')
     html_parts.append('</tbody></table></div>\n')
@@ -1294,7 +1310,8 @@ for cat in CATEGORIES:
             "srri": f.get("srri"), "vl": f.get("vl"),
             "ytd": f.get("ytd"), "m1": f.get("m1"), "m6": f.get("m6"),
             "a1": f.get("a1"), "a3": f.get("a3"), "a5": f.get("a5"),
-            "bid": f.get("bid"),
+            "eom": f.get("perf_eom") or {}, "gli": f.get("perf_gli") or {},
+            "bid": f.get("bid"), "vl_date": f.get("vl_date"),
             "vol": f.get("vol"), "mdd": f.get("mdd"),
         })
 all_funds_js = json.dumps(all_funds_list, ensure_ascii=False)
@@ -1423,7 +1440,9 @@ class TinyChart {
     if (!n||!ds.length) return;
     const legRows=Math.ceil(ds.length/3);
     const LEGH=legRows*20+10;
-    const PL=50, PR=12, PT=14, PB=30+LEGH;
+    // PR élargi : la dernière étiquette de l'axe X est centrée sur le dernier
+    // point et doit tenir entièrement dans le canvas.
+    const PL=50, PR=30, PT=14, PB=30+LEGH;
     const cW=W-PL-PR, cH=H-PT-PB;
     const allV=ds.flatMap(d=>(d.data||[]).filter(v=>v!=null&&!isNaN(v)));
     if (!allV.length) return;
@@ -1449,15 +1468,21 @@ class TinyChart {
       ctx.beginPath(); ctx.moveTo(PL,yP(0)); ctx.lineTo(PL+cW,yP(0)); ctx.stroke();
       ctx.setLineDash([]);
     }
-    // x vertical grid lines (légères)
+    // Espacement des libellés : au moins 46 px entre deux étiquettes, ancré
+    // sur la dernière date pour qu'elle soit toujours affichée.
+    const maxLbl=Math.max(2,Math.floor(cW/46));
+    const lblStep=Math.max(1,Math.ceil(n/maxLbl));
+    const showLbl=i=>(n-1-i)%lblStep===0;
+    // x vertical grid lines (légères) — uniquement sous les libellés affichés
     ctx.strokeStyle='#edf2f7'; ctx.lineWidth=1; ctx.setLineDash([2,4]);
     for(let i=0;i<n;i++){
+      if(!showLbl(i)) continue;
       ctx.beginPath(); ctx.moveTo(xP(i),PT); ctx.lineTo(xP(i),PT+cH); ctx.stroke();
     }
     ctx.setLineDash([]);
     // x labels
     ctx.fillStyle='#4a5568'; ctx.font='bold 11px system-ui'; ctx.textAlign='center';
-    labels.forEach((l,i)=>ctx.fillText(l, xP(i), PT+cH+16));
+    labels.forEach((l,i)=>{ if(showLbl(i)) ctx.fillText(l, xP(i), PT+cH+16); });
     // x axis
     ctx.strokeStyle='#e2e8f0'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(PL,PT+cH); ctx.lineTo(PL+cW,PT+cH); ctx.stroke();
@@ -1519,12 +1544,14 @@ class TinyChart {
       (d.data||[]).forEach((v,i)=>{
         if(v==null||isNaN(v)) return;
         const isHov=i===hovXIdx;
-        const r=isHov?6:(d.pointRadius||4);
+        const pr=(d.pointRadius==null)?4:d.pointRadius;
+        if(pr<=0 && !isHov) return;   // séries denses : pas de pastilles
+        const r=isHov?6:pr;
         ctx.beginPath(); ctx.arc(xP(i),yP(v),r,0,Math.PI*2);
         ctx.fillStyle='#fff'; ctx.fill();
         ctx.strokeStyle=d.borderColor||'#3266ad'; ctx.lineWidth=2; ctx.stroke();
         // Valeur affichée sur le point (sauf si trop de courbes → lisibilité)
-        if (ds.length<=6 || isHov) {
+        if ((ds.length<=6 && pr>0) || isHov) {
           const txt=(v>=0?'+':'')+v.toFixed(1)+'%';
           ctx.font=isHov?'bold 10px system-ui':'9px system-ui';
           ctx.fillStyle=d.borderColor||'#3266ad';
@@ -1662,12 +1689,12 @@ function applyFilters() {{
       <td data-val="${'{f.cat_label}'}" style="font-size:11px;color:#718096">${'{f.cat_label}'}</td>
       <td style="text-align:center" data-val="${'{f.srri}'}">${{`<span class="srri-badge" style="background:${{sc}}">${{f.srri}}</span>`}}</td>
       <td style="text-align:right" data-val="${'{f.vl || 0}'}">${{fmtVL(f.vl)}}</td>
-      <td style="text-align:right" data-val="${'{f.ytd ?? -9999}'}">${{fmt(f.ytd)}}</td>
-      <td style="text-align:right" data-val="${'{f.m1 ?? -9999}'}">${{fmt(f.m1)}}</td>
-      <td style="text-align:right" data-val="${'{f.m6 ?? -9999}'}">${{fmt(f.m6)}}</td>
-      <td style="text-align:right" data-val="${'{f.a1 ?? -9999}'}">${{fmt(f.a1)}}</td>
-      <td style="text-align:right" data-val="${'{f.a3 ?? -9999}'}">${{fmt(f.a3)}}</td>
-      <td style="text-align:right" data-val="${'{f.a5 ?? -9999}'}">${{fmt(f.a5)}}</td>
+      <td style="text-align:right" data-val="${'{pv(f,"ytd") ?? -9999}'}">${{fmt(pv(f,'ytd'))}}</td>
+      <td style="text-align:right" data-val="${'{pv(f,"m1") ?? -9999}'}">${{fmt(pv(f,'m1'))}}</td>
+      <td style="text-align:right" data-val="${'{pv(f,"m6") ?? -9999}'}">${{fmt(pv(f,'m6'))}}</td>
+      <td style="text-align:right" data-val="${'{pv(f,"a1") ?? -9999}'}">${{fmt(pv(f,'a1'))}}</td>
+      <td style="text-align:right" data-val="${'{pv(f,"a3") ?? -9999}'}">${{fmt(pv(f,'a3'))}}</td>
+      <td style="text-align:right" data-val="${'{pv(f,"a5") ?? -9999}'}">${{fmt(pv(f,'a5'))}}</td>
       <td style="text-align:right;color:#718096" data-val="${'{f.vol ?? -9999}'}">${{f.vol != null ? f.vol.toFixed(1).replace('.',',') + '%' : '<span class="na">—</span>'}}</td>
       <td style="text-align:right" data-val="${'{f.mdd ?? -9999}'}">${{f.mdd != null ? (f.mdd < 0 ? '<span class="neg">' + f.mdd.toFixed(1).replace('.',',') + '%</span>' : '0,0%') : '<span class="na">—</span>'}}</td>
     </tr>`;
@@ -1726,11 +1753,28 @@ function sortTable(tableId, col) {{
 const BAR_CHARTS = {bar_js};
 const barInstances = {{}};
 
+// ── Convention de performance active : 'eom' (à la fin de mois) | 'gli' (glissantes)
+let PERF_MODE = 'eom';
+const PERF_MODE_HELP = {{
+  eom: "Arrêtées à la dernière VL du mois précédent — stables d'un jour à l'autre.",
+  gli: "Arrêtées à la dernière VL connue — cohérentes avec la VL affichée, mais elles bougent chaque jour."
+}};
+function barPeriods(c) {{
+  return (c.periodsByMode && c.periodsByMode[PERF_MODE]) || c.periods;
+}}
+// Valeur d'un fonds dans la convention active (ALL_FUNDS)
+function pv(f, k) {{
+  const src = (PERF_MODE === 'gli' ? f.gli : f.eom) || {{}};
+  let v = src[k];
+  if (v === undefined || v === null) v = (k === 'ytd' ? f.ytd : null);
+  return (v === undefined) ? null : v;
+}}
+
 BAR_CHARTS.forEach(c => {{
   const canvas = document.getElementById(c.id);
   if (!canvas) return;
   const catId = c.id.replace('bar_','');
-  const pd = c.periods['YTD'];
+  const pd = barPeriods(c)['YTD'];
   barInstances[catId] = new TinyChart(canvas, {{
     type: 'hbar',
     labels: c.labels,
@@ -1748,49 +1792,115 @@ function filterBarPeriod(catId, period) {{
   if (!chart) return;
   const barDef = BAR_CHARTS.find(c => c.id === 'bar_'+catId);
   if (!barDef) return;
-  const pd = barDef.periods[period];
+  const pd = barPeriods(barDef)[period];
   chart.setData(barDef.labels, [{{ data: pd.data, backgroundColor: pd.colors }}]);
   const el = document.getElementById('bartitle_'+catId);
   if (el) el.textContent = 'Performance ' + BAR_PERIOD_TITLES[period];
 }}
 
-// ── Line charts (TinyChart) — historique mensuel ou performances cumulées ────
-// Chaque entrée de LINE_CHARTS contient ses propres labels, weights et mode.
+function setPerfMode(mode) {{
+  if (mode !== 'eom' && mode !== 'gli') return;
+  PERF_MODE = mode;
+  document.querySelectorAll('.period-btn[data-pmode]').forEach(b =>
+    b.classList.toggle('active', b.dataset.pmode === mode));
+  const help = document.getElementById('perfmodeHelp');
+  if (help) help.textContent = PERF_MODE_HELP[mode];
+
+  // Cellules de performance des tableaux par catégorie
+  const attr = (mode === 'gli') ? 'g' : 'e';
+  document.querySelectorAll('td.perf-cell[data-k]').forEach(td => {{
+    const raw = td.dataset[attr];
+    if (raw === undefined || raw === '') {{
+      td.innerHTML = '<span class="na">—</span>';
+      td.dataset.val = '-9999';
+      return;
+    }}
+    const v = parseFloat(raw);
+    td.dataset.val = String(v);
+    const cls = v > 0 ? 'pos' : (v < 0 ? 'neg' : 'neu');
+    td.innerHTML = '<span class="' + cls + '">' + (v >= 0 ? '+' : '') + v.toFixed(2) + '%</span>';
+  }});
+
+  // Graphiques en barres
+  BAR_CHARTS.forEach(c => {{
+    const catId = c.id.replace('bar_','');
+    const inst = barInstances[catId];
+    if (!inst) return;
+    const btn = document.querySelector('.period-btn[data-cat="'+catId+'"][data-bperiod].active');
+    const per = btn ? btn.dataset.bperiod : 'YTD';
+    const pd = barPeriods(c)[per];
+    if (pd) inst.setData(c.labels, [{{ data: pd.data, backgroundColor: pd.colors }}]);
+  }});
+
+  // Tableau de résultats (recherche / SRRI)
+  const fr = document.getElementById('filterResults');
+  if (fr && fr.classList.contains('active')) applyFilters();
+}}
+
+// ── Line charts (TinyChart) — évolution de la VL réelle ────────────────────
+// Chaque courbe est rebasée à 0 % sur la PREMIÈRE date de la fenêtre affichée.
+// Un fonds sans VL à cette date est exclu du graphique (et signalé), plutôt que
+// rebasé sur sa propre date de départ : sinon les % ne sont pas comparables.
 const LINE_CHARTS = {line_js};
 const lineInstances = {{}};
-const lineFullDs    = {{}};   // catId → datasets complets (fullData intacts)
-const lineMeta      = {{}};   // catId → {{mode, labels, weights}}
+const lineMeta      = {{}};
 
-// Indices de départ pour le mode "performance" (7 points)
-const PERF_START = {{'5A':0,'3A':1,'1A':2,'6M':3,'1M':4,'YTD':5}};
-// Nombre de mois à afficher pour le mode "historical"
-const HIST_COUNT = {{'12M':12,'6M':6,'3M':3,'1M':1}};
+// Nombre de points mensuels affichés par période (n mois + le point de base)
+const LINE_COUNT = {{'3M':4, '6M':7, '1A':13, '3A':37, '5A':61}};
+
+function lineBuild(catId, period) {{
+  const meta = lineMeta[catId];
+  if (!meta) return null;
+  const total = meta.labels.length;
+  const n     = LINE_COUNT[period] || total;
+  const start = Math.max(0, total - n);
+  const labels = meta.labels.slice(start);
+  const ds = [];
+  let excluded = 0;
+  meta.datasets.forEach(d => {{
+    const win  = d.vl.slice(start);
+    const base = win[0];
+    if (base == null || base === 0) {{ excluded++; return; }}
+    ds.push({{
+      label:       d.label,
+      data:        win.map(v => v == null ? null : Math.round((v / base - 1) * 10000) / 100),
+      borderColor: d.borderColor,
+      borderWidth: d.borderWidth || 2,
+      pointRadius: labels.length > 24 ? 0 : 2
+    }});
+  }});
+  return {{ labels: labels, ds: ds, excluded: excluded, from: meta.dates[start], to: meta.dates[total-1] }};
+}}
+
+function lineNote(catId, built, period) {{
+  const el = document.getElementById('linenote_' + catId);
+  if (!el || !built) return;
+  const per = {{'3M':'3 mois','6M':'6 mois','1A':'1 an','3A':'3 ans','5A':'5 ans'}}[period] || period;
+  let txt = built.ds.length + ' fonds sur ' + per + ' · base 0 % au ' + (built.from || '?');
+  if (built.excluded > 0) {{
+    txt += ' · ' + built.excluded + ' fonds non affiché' + (built.excluded > 1 ? 's' : '')
+        + ' (pas de VL à cette date de départ)';
+  }}
+  el.textContent = txt;
+}}
 
 LINE_CHARTS.forEach(c => {{
   const canvas = document.getElementById(c.id);
   if (!canvas || !c.datasets.length) return;
   const catId = c.id.replace('line_','');
-  const allLabels  = c.labels  || [];
-  const allWeights = c.weights || null;   // null → espacement uniforme
-  const builtDs = c.datasets.map(ds => ({{
-    label:       ds.label,
-    data:        (ds.fullData||ds.data).slice(),
-    fullData:    (ds.fullData||ds.data).slice(),
-    borderColor: ds.borderColor,
-    borderWidth: ds.borderWidth || 2,
-    pointRadius: ds.pointRadius || 4
-  }}));
-  lineFullDs[catId] = builtDs;
-  lineMeta[catId]   = {{ mode: c.mode || 'performance', labels: allLabels, weights: allWeights,
-    perfLabels: c.perfLabels || null, perfWeights: c.perfWeights || null,
-    perfDs: c.perfDatasets ? c.perfDatasets.map(ds => ({{...ds, fullData:(ds.fullData||ds.data).slice()}})) : null
+  lineMeta[catId] = {{
+    labels:   c.labels || [],
+    dates:    c.dates  || [],
+    datasets: c.datasets.map(d => ({{
+      label: d.label, vl: (d.vl || d.fullData || d.data || []).slice(),
+      borderColor: d.borderColor, borderWidth: d.borderWidth || 2
+    }}))
   }};
+  const built = lineBuild(catId, '1A');
   lineInstances[catId] = new TinyChart(canvas, {{
-    type:     'line',
-    labels:   allLabels.slice(),
-    xWeights: allWeights ? allWeights.slice() : null,
-    datasets: builtDs.map(ds => ({{ ...ds, data: ds.fullData.slice() }}))
+    type: 'line', labels: built.labels, xWeights: null, datasets: built.ds
   }});
+  lineNote(catId, built, '1A');
 }});
 
 function filterLinePeriod(catId, period) {{
@@ -1799,51 +1909,10 @@ function filterLinePeriod(catId, period) {{
   }});
   const chart = lineInstances[catId];
   if (!chart) return;
-  const meta       = lineMeta[catId] || {{}};
-  const mode       = meta.mode    || 'performance';
-
-  // Mode historique + période longue (3A/5A) → basculer sur les données de performance statiques
-  const isPerfPeriod = period === '3A' || period === '5A';
-  if (mode === 'historical' && isPerfPeriod && meta.perfDs && meta.perfLabels) {{
-    const start = PERF_START[period] || 0;
-    const labels = meta.perfLabels.slice(start);
-    const newDs  = meta.perfDs.map(ds => ({{ ...ds, data: ds.fullData.slice(start) }}));
-    let normW = null;
-    if (meta.perfWeights) {{
-      const rawW = meta.perfWeights.slice(start);
-      const wMin = rawW[0], wMax = rawW[rawW.length-1], wRange = wMax - wMin || 1;
-      normW = rawW.map(w => (w - wMin) / wRange);
-    }}
-    chart.setData(labels, newDs, normW);
-    return;
-  }}
-
-  const allLabels  = meta.labels  || [];
-  const allWeights = meta.weights || null;
-
-  // Calculer l'indice de début selon le mode
-  let start = 0;
-  if (mode === 'historical') {{
-    const count = HIST_COUNT[period] || allLabels.length;
-    start = Math.max(0, allLabels.length - count);
-  }} else {{
-    start = PERF_START[period] || 0;
-  }}
-
-  const slicedLabels = allLabels.slice(start);
-  const newDs = (lineFullDs[catId]||[]).map(ds => ({{
-    ...ds,
-    data: ds.fullData.slice(start)
-  }}));
-
-  // Re-normaliser les poids proportionnels pour la plage affichée
-  let normW = null;
-  if (allWeights) {{
-    const rawW = allWeights.slice(start);
-    const wMin = rawW[0], wMax = rawW[rawW.length-1], wRange = wMax - wMin || 1;
-    normW = rawW.map(w => (w - wMin) / wRange);
-  }}
-  chart.setData(slicedLabels, newDs, normW);
+  const built = lineBuild(catId, period);
+  if (!built) return;
+  chart.setData(built.labels, built.ds, null);
+  lineNote(catId, built, period);
 }}
 
 // ── Portfolio tabs ────────────────────────────────────────────────────────────
